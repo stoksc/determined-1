@@ -267,7 +267,7 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 		ops, err := e.searcher.WorkloadCompleted(msg)
 		e.processOperations(ctx, ops, err)
 		if msg.Workload.Kind == searcher.ComputeValidationMetrics {
-			ctx.Respond(e.isBestValidation(msg))
+			ctx.Respond(e.isBestValidation(ctx, msg))
 		}
 		progress := e.searcher.Progress()
 		if err = e.db.SaveExperimentProgress(e.ID, &progress); err != nil {
@@ -328,12 +328,12 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 	// Experiment shutdown logic.
 	case actor.PostStop:
 		if err := e.db.SaveExperimentProgress(e.ID, nil); err != nil {
-			ctx.Log().Error(err)
+			ctx.Log().WithError(err).Error("error saving progress during shutdown")
 		}
 
 		// Flush any remaining searcher logs
 		if err := e.db.AddSearcherEvents(e.pendingEvents); err != nil {
-			ctx.Log().Error(err)
+			ctx.Log().WithError(err).Error("error flushing remaining events during shutdown")
 			e.updateState(ctx, model.StoppingErrorState)
 		}
 
@@ -376,7 +376,7 @@ func (e *experiment) processOperations(
 		return
 	}
 	if err != nil {
-		ctx.Log().Error(err)
+		ctx.Log().WithError(err).Error("error received in processOperations")
 		e.updateState(ctx, model.StoppingErrorState)
 		return
 	}
@@ -398,7 +398,7 @@ func (e *experiment) processOperations(
 				}
 				checkpointModel, err := checkpointFromTrialIDOrUUID(e.db, &trialID, nil)
 				if err != nil {
-					ctx.Log().Error(errors.Wrap(err, "checkpoint not found"))
+					ctx.Log().WithError(err).Error("checkpoint not found")
 					e.updateState(ctx, model.StoppingErrorState)
 					return
 				}
@@ -426,7 +426,7 @@ func (e *experiment) processOperations(
 		for _, event := range events {
 			modelEvent, flush, err := convertSearcherEvent(e.ID, event)
 			if err != nil {
-				ctx.Log().Error(err)
+				ctx.Log().WithError(err).Errorf("error converting searcher event %v", event)
 				e.updateState(ctx, model.StoppingErrorState)
 				return
 			}
@@ -443,7 +443,7 @@ func (e *experiment) processOperations(
 		// be strictly valid, which is non-ideal, but Searcher Reload (DET-816) is the "real" fix.
 		if flushEvents || len(e.pendingEvents) > searcherEventBuffer {
 			if err := e.db.AddSearcherEvents(e.pendingEvents); err != nil {
-				ctx.Log().Error(err)
+				ctx.Log().WithError(err).Error("error flushing pending events")
 				e.updateState(ctx, model.StoppingErrorState)
 				return
 			}
@@ -452,11 +452,12 @@ func (e *experiment) processOperations(
 	}
 }
 
-func (e *experiment) isBestValidation(msg searcher.CompletedMessage) bool {
+func (e *experiment) isBestValidation(ctx *actor.Context, msg searcher.CompletedMessage) bool {
 	metricName := e.Config.Searcher.Metric
 	validation, err := msg.ValidationMetrics.Metric(metricName)
 	if err != nil {
 		// TODO: Better error handling here.
+		ctx.Log().WithError(err).Error("error retreiving metric")
 		return false
 	}
 	if e.bestValidation == nil {
@@ -476,7 +477,7 @@ func (e *experiment) isBestValidation(msg searcher.CompletedMessage) bool {
 
 func (e *experiment) updateState(ctx *actor.Context, state model.State) {
 	if wasPatched, err := e.Transition(state); err != nil {
-		ctx.Log().Error(err)
+		ctx.Log().WithError(err).Error("error transitioning experiment")
 		return
 	} else if !wasPatched {
 		return
@@ -488,7 +489,7 @@ func (e *experiment) updateState(ctx *actor.Context, state model.State) {
 		ctx.Tell(child, state)
 	}
 	if err := e.db.SaveExperimentState(e.Experiment); err != nil {
-		ctx.Log().Error(err)
+		ctx.Log().WithError(err).Error("error saving experiment state")
 	}
 	if e.canTerminate(ctx) {
 		ctx.Self().Stop()
