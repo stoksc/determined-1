@@ -68,6 +68,7 @@ node_modules/
 
 # VSCode
 .vscode/
+*.code-workspace
 
 # JetBrains IDEs (e.g., PyCharm and GoLand)
 .idea/
