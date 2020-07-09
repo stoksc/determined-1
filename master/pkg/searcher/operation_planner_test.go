@@ -11,7 +11,7 @@ import (
 
 func TestOperationPlanner(t *testing.T) {
 	rand := nprand.New(0)
-	opPlanner := NewOperationPlanner(model.Batches, 100, 0)
+	opPlanner := NewOperationPlanner(100, 0, model.NewLengthInBatches(0), model.NewLengthInBatches(0))
 
 	create := NewCreate(
 		rand, sampleAll(defaultHyperparameters(), rand), model.TrialWorkloadSequencerType)

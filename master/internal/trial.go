@@ -212,7 +212,8 @@ func newTrial(
 		modelDefinition:       exp.modelDefinition,
 		warmStartCheckpointID: warmStartCheckpointID,
 
-		sequencer: newTrialWorkloadSequencer(exp.Experiment, create, firstCheckpoint),
+		sequencer: newTrialWorkloadSequencer(
+			exp.ID, exp.Config.CheckpointPolicy, create, firstCheckpoint),
 
 		create:    create,
 		replaying: exp.replaying,

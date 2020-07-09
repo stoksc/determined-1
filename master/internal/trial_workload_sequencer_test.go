@@ -131,7 +131,7 @@ checkpoint_policy: none
 		Workload: validationWorkload2,
 	}
 
-	s := newTrialWorkloadSequencer(experiment, create, nil)
+	s := newTrialWorkloadSequencer(experiment.ID, expConfig.CheckpointPolicy, create, nil)
 
 	// Check that upToDate() returns true as soon as sequencer is created.
 	assert.Assert(t, s.UpToDate())

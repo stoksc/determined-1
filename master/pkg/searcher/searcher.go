@@ -20,16 +20,17 @@ type Searcher struct {
 
 // NewSearcher creates a new Searcher configured with the provided searcher config.
 func NewSearcher(
-	seed uint32, method SearchMethod, hparams model.Hyperparameters, batchesPerStep,
-	recordsPerEpoch int,
+	seed uint32, method SearchMethod, hparams model.Hyperparameters,
+	batchesPerStep, recordsPerEpoch int, minValidationPeriod, minCheckpointPeriod model.Length,
 ) *Searcher {
 	rand := nprand.New(seed)
 	return &Searcher{
-		rand:             rand,
-		hparams:          hparams,
-		eventLog:         NewEventLog(),
-		method:           method,
-		operationPlanner: NewOperationPlanner(method.unit(), batchesPerStep, recordsPerEpoch),
+		rand:     rand,
+		hparams:  hparams,
+		eventLog: NewEventLog(),
+		method:   method,
+		operationPlanner: NewOperationPlanner(batchesPerStep, recordsPerEpoch,
+			minValidationPeriod, minCheckpointPeriod),
 	}
 }
 

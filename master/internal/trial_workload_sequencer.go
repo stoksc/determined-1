@@ -33,13 +33,11 @@ type trialWorkloadSequencer struct {
 	curWorkloadValid bool
 
 	latestCheckpoint *model.Checkpoint
-	experiment       *model.Experiment
 	create           searcher.Create
 
-	checkpointPolicy    string
-	minValidationPeriod *int
-	minCheckpointPeriod *int
+	checkpointPolicy string
 
+	experimentID int
 	trialID      int
 	trialIDValid bool
 
@@ -47,17 +45,16 @@ type trialWorkloadSequencer struct {
 }
 
 func newTrialWorkloadSequencer(
-	exp *model.Experiment, create searcher.Create, firstCheckpoint *model.Checkpoint,
+	experimentID int, checkpointPolicy string, create searcher.Create,
+	firstCheckpoint *model.Checkpoint,
 ) *trialWorkloadSequencer {
 	return &trialWorkloadSequencer{
-		steps:               []stepInfo{{true, true, 0, 0}},
-		curStepDone:         stepInfo{true, true, 0, 0},
-		checkpointPolicy:    exp.Config.CheckpointPolicy,
-		minValidationPeriod: exp.Config.MinValidationPeriod,
-		minCheckpointPeriod: exp.Config.MinCheckpointPeriod,
-		latestCheckpoint:    firstCheckpoint,
-		create:              create,
-		experiment:          exp,
+		steps:            []stepInfo{{true, true, 0, 0}},
+		curStepDone:      stepInfo{true, true, 0, 0},
+		latestCheckpoint: firstCheckpoint,
+		create:           create,
+		checkpointPolicy: checkpointPolicy,
+		experimentID:     experimentID,
 	}
 }
 
@@ -140,13 +137,6 @@ func (s *trialWorkloadSequencer) WorkloadCompleted(
 			if *msg.ExitedReason == searcher.UserCanceled {
 				s.steps[msg.Workload.StepID].hasCheckpoint = true
 			}
-		} else {
-			if s.minValidationNeeded() {
-				s.steps[msg.Workload.StepID].hasValidation = true
-			}
-			if s.minCheckpointNeeded() {
-				s.steps[msg.Workload.StepID].hasCheckpoint = true
-			}
 		}
 	case searcher.CheckpointModel:
 		// During replay, a checkpoint can show up for earlier than the current step ID if the
@@ -225,7 +215,7 @@ func (s *trialWorkloadSequencer) Workload() (searcher.Workload, error) {
 	}
 	s.curWorkload = searcher.Workload{
 		Kind:                  kind,
-		ExperimentID:          s.experiment.ID,
+		ExperimentID:          s.experimentID,
 		TrialID:               s.trialID,
 		StepID:                stepID,
 		NumBatches:            numBatches,
@@ -246,7 +236,7 @@ func (s *trialWorkloadSequencer) PrecloseCheckpointWorkload() *searcher.Workload
 	}
 	return &searcher.Workload{
 		Kind:                  searcher.CheckpointModel,
-		ExperimentID:          s.experiment.ID,
+		ExperimentID:          s.experimentID,
 		TrialID:               s.trialID,
 		StepID:                s.curStep,
 		NumBatches:            0,
@@ -257,7 +247,7 @@ func (s *trialWorkloadSequencer) PrecloseCheckpointWorkload() *searcher.Workload
 func (s *trialWorkloadSequencer) TerminateWorkload() *searcher.Workload {
 	return &searcher.Workload{
 		Kind:         searcher.Terminate,
-		ExperimentID: s.experiment.ID,
+		ExperimentID: s.experimentID,
 		TrialID:      s.trialID,
 		StepID:       s.curStep,
 	}
@@ -280,28 +270,4 @@ func (s *trialWorkloadSequencer) UpToDate() bool {
 	// If all operations for the last asked-for step are done, then the trial has no more workloads
 	// to run at the moment.
 	return s.curStep == len(s.steps)-1 && s.curStepDone == s.steps[s.curStep]
-}
-
-func (s *trialWorkloadSequencer) minValidationNeeded() bool {
-	validationPeriod := s.minValidationPeriod
-	if validationPeriod == nil {
-		return false
-	}
-	stepsSinceValidation := 0
-	for i := s.curStep; !s.steps[i].hasValidation; i-- {
-		stepsSinceValidation++
-	}
-	return stepsSinceValidation >= *validationPeriod
-}
-
-func (s *trialWorkloadSequencer) minCheckpointNeeded() bool {
-	checkpointPeriod := s.minCheckpointPeriod
-	if checkpointPeriod == nil {
-		return false
-	}
-	stepsSinceCheckpoint := 0
-	for i := s.curStep; !s.steps[i].hasCheckpoint; i-- {
-		stepsSinceCheckpoint++
-	}
-	return stepsSinceCheckpoint >= *checkpointPeriod
 }
