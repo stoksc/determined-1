@@ -5,12 +5,11 @@ hyperparameters:
     type: int
     minval: 32
     maxval: 256
-records_per_epoch: 50000
 searcher:
   name: adaptive_asha
   metric: val_accuracy
   smaller_is_better: false
   max_length:
-    epochs: 5
+    records: 250000
   max_trials: 10
 entrypoint: model_def:FashionMNISTTrial
