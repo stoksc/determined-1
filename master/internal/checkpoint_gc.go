@@ -24,6 +24,17 @@ type checkpointGCTask struct {
 	logs []sproto.ContainerLog
 }
 
+func newCheckpointGCTask(
+	ddb *db.PgDB, rp *actor.Ref, exp *model.Experiment, agentUserGroup *model.AgentUserGroup,
+) *checkpointGCTask {
+	return &checkpointGCTask{
+		rp: rp,
+		db: ddb,
+		experiment: exp,
+		agentUserGroup: agentUserGroup,
+	}
+}
+
 func (t *checkpointGCTask) Receive(ctx *actor.Context) error {
 	switch msg := ctx.Message().(type) {
 	case actor.PreStart:

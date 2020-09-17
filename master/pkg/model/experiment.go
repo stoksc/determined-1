@@ -379,6 +379,14 @@ func NewCheckpoint(trialID, stepID int) *Checkpoint {
 	}
 }
 
+// ID returns the checkpoint's ID or nil if the checkpoint is nil.
+func (c *Checkpoint) GetID() *int {
+	if c == nil {
+		return nil
+	}
+	return &c.ID
+}
+
 // IsNew checks whether this checkpoint describes a new, in-progress checkpoint operation.
 func (c *Checkpoint) IsNew() bool {
 	return c.State == ActiveState && c.ID == 0 && c.EndTime == nil &&

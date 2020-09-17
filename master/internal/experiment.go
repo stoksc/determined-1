@@ -97,14 +97,15 @@ type experiment struct {
 // Create a new experiment object from the given model experiment object, along with its searcher
 // and log. If the input object has no ID set, also create a new experiment in the database and set
 // the returned object's ID appropriately.
-func newExperiment(master *Master, expModel *model.Experiment) (*experiment, error) {
+func newExperiment(
+	expModel *model.Experiment, ddb *db.PgDB, rp *actor.Ref, trialLogger *actor.Ref, masterConf *Config,
+) (*experiment, error) {
 	conf := expModel.Config
 	method := searcher.NewSearchMethod(conf.Searcher)
 	search := searcher.NewSearcher(conf.Reproducibility.ExperimentSeed, method, conf.Hyperparameters)
 
 	// Retrieve the warm start checkpoint, if provided.
-	checkpoint, err := checkpointFromTrialIDOrUUID(
-		master.db, conf.Searcher.SourceTrialID, conf.Searcher.SourceCheckpointUUID)
+	checkpoint, err := checkpointFromTrialIDOrUUID(ddb, conf.Searcher.SourceTrialID, conf.Searcher.SourceCheckpointUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,32 +117,32 @@ func newExperiment(master *Master, expModel *model.Experiment) (*experiment, err
 	}
 
 	if expModel.ID == 0 {
-		if err = master.db.AddExperiment(expModel); err != nil {
+		if err = ddb.AddExperiment(expModel); err != nil {
 			return nil, err
 		}
 	}
 
-	agentUserGroup, err := master.db.AgentUserGroup(*expModel.OwnerID)
+	agentUserGroup, err := ddb.AgentUserGroup(*expModel.OwnerID)
 	if err != nil {
 		return nil, err
 	}
 
 	if agentUserGroup == nil {
-		agentUserGroup = &master.config.Security.DefaultTask
+		agentUserGroup = &masterConf.Security.DefaultTask
 	}
 
 	return &experiment{
 		Experiment:          expModel,
 		modelDefinition:     modelDefinition,
-		rp:                  master.rp,
-		trialLogger:         master.trialLogger,
-		db:                  master.db,
+		rp:                  rp,
+		trialLogger:         trialLogger,
+		db:                  ddb,
 		searcher:            search,
 		warmStartCheckpoint: checkpoint,
 		pendingEvents:       make([]*model.SearcherEvent, 0, searcherEventBuffer),
 
 		agentUserGroup:        agentUserGroup,
-		taskContainerDefaults: &master.config.TaskContainerDefaults,
+		taskContainerDefaults: &masterConf.TaskContainerDefaults,
 	}, nil
 }
 
@@ -232,7 +233,7 @@ func restoreExperiment(master *Master, expModel *model.Experiment) error {
 		)
 	}
 
-	e, err := newExperiment(master, expModel)
+	e, err := newExperiment(expModel, master.db, master.rp, master.trialLogger, master.config)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create experiment %d from model", expModel.ID)
 	}
@@ -394,12 +395,7 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 		}
 		ctx.Log().Infof("experiment state changed to %s", e.State)
 		addr := actor.Addr(fmt.Sprintf("experiment-%d-checkpoint-gc", e.ID))
-		ctx.Self().System().ActorOf(addr, &checkpointGCTask{
-			agentUserGroup: e.agentUserGroup,
-			rp:             e.rp,
-			db:             e.db,
-			experiment:     e.Experiment,
-		})
+		ctx.Self().System().ActorOf(addr, newCheckpointGCTask(e.db, e.rp, e.Experiment, e.agentUserGroup))
 
 		// Discard searcher events for all terminal experiments (even failed ones).
 		// This is safe because we never try to restore the state of the searcher for
