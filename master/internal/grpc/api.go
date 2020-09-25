@@ -53,7 +53,13 @@ func NewGRPCServer(db *db.PgDB, srv proto.DeterminedServer) *grpc.Server {
 }
 
 // RegisterHTTPProxy registers grpc-gateway with the master echo server.
-func RegisterHTTPProxy(e *echo.Echo, port int, enableCORS bool, cert *tls.Certificate) error {
+func RegisterHTTPProxy(
+	e *echo.Echo,
+	port int,
+	enableCORS bool,
+	cert *tls.Certificate,
+	grpcGatewayBypass func(echo.Context) (error, bool),
+) error {
 	addr := fmt.Sprintf(":%d", port)
 	serverOpts := []runtime.ServeMuxOption{
 		runtime.WithMarshalerOption(jsonPretty,
@@ -78,6 +84,9 @@ func RegisterHTTPProxy(e *echo.Echo, port int, enableCORS bool, cert *tls.Certif
 		return err
 	}
 	e.Any("/api/v1/*", func(c echo.Context) error {
+		if err, bypassed := grpcGatewayBypass(c); bypassed {
+			return err
+		}
 		request := c.Request()
 		if origin := request.Header.Get("Origin"); enableCORS && origin != "" {
 			c.Response().Header().Set("Access-Control-Allow-Origin", origin)

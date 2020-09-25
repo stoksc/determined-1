@@ -129,7 +129,10 @@ func (m *Master) getMasterLogs(c echo.Context) (interface{}, error) {
 	return entries, nil
 }
 
-func (m *Master) startServers(cert *tls.Certificate) error {
+func (m *Master) startServers(
+	cert *tls.Certificate,
+	grpcGatewayBypass func(c echo.Context) (error, bool),
+) error {
 	// Create the base TCP socket listener and, if configured, set up TLS wrapping.
 	baseListener, err := net.Listen("tcp", fmt.Sprintf(":%d", m.config.Port))
 	if err != nil {
@@ -145,7 +148,8 @@ func (m *Master) startServers(cert *tls.Certificate) error {
 	}
 
 	// Initialize listeners and multiplexing.
-	if err := grpc.RegisterHTTPProxy(m.echo, m.config.Port, m.config.EnableCors, cert); err != nil {
+	if err := grpc.RegisterHTTPProxy(
+		m.echo, m.config.Port, m.config.EnableCors, cert, grpcGatewayBypass); err != nil {
 		return errors.Wrap(err, "failed to register gRPC gateway")
 	}
 
@@ -483,6 +487,16 @@ func (m *Master) Run() error {
 	experimentsGroup.POST("/:experiment_id/kill", api.Route(m.postExperimentKill))
 	experimentsGroup.DELETE("/:experiment_id", api.Route(m.deleteExperiment))
 
+	// One-off create experiment handler... this is needed because echo's routing secretly sucks.
+	// It is passed to grpc gateway's setup routine to bypass it.
+	eh := api.Route(m.postExperiment)
+	bypass := func(c echo.Context) (error, bool) {
+		if c.Request().Method == echo.POST && c.Request().URL.Path == "/api/v1/experiments" {
+			return userService.ProcessAuthentication(eh)(c), true
+		}
+		return nil, false
+	}
+
 	searcherGroup := m.echo.Group("/searcher", authFuncs...)
 	searcherGroup.POST("/preview", api.Route(m.getSearcherPreview))
 
@@ -557,5 +571,5 @@ func (m *Master) Run() error {
 		log.Info("telemetry reporting is disabled")
 	}
 
-	return m.startServers(cert)
+	return m.startServers(cert, bypass)
 }
