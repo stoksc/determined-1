@@ -1,4 +1,4 @@
-package fetchers
+package logbuffer
 
 import (
 	"github.com/determined-ai/determined/master/internal/logs"

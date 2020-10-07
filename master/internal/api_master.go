@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	lbfetchers "github.com/determined-ai/determined/master/internal/logs/fetchers/logbuffer"
 
 	"github.com/google/uuid"
 
@@ -12,7 +13,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/determined-ai/determined/master/internal/logs"
-	"github.com/determined-ai/determined/master/internal/logs/fetchers"
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/proto/pkg/logv1"
 
@@ -62,7 +62,7 @@ func (a *apiServer) MasterLogs(
 			resp.Context(),
 			limit,
 			req.Follow,
-			fetchers.NewMasterLogsFetcher(a.m.logs, offset),
+			lbfetchers.NewMasterLogsFetcher(a.m.logs, offset),
 			onBatch,
 			nil, // The only condition that would terminate master logs would terminate us as well, heh.
 			nil,

@@ -1,4 +1,4 @@
-package fetchers
+package postgres
 
 import (
 	"github.com/determined-ai/determined/master/pkg/check"
@@ -54,7 +54,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 				{
 					Field:     "agent_id",
 					Operation: filters.Filter_OPERATION_EQUAL,
-					Values: toFilterStringValues([]string{agent0}),
+					Values:    toFilterStringValues([]string{agent0}),
 				},
 			},
 			logs: []*model.TrialLog{
@@ -255,7 +255,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 					Values:    toFilterStringValues([]string{"12:12:12 not a time"}),
 				},
 			},
-			validationError: "unsupported values *filters.Filter_StringValues for filter timestamp",
+			validationError: "unsupported values",
 		},
 		{
 			name: "ordered fields only accept ordering operations",
@@ -266,7 +266,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 					Values:    toFilterTimestampValues([]time.Time{time0}),
 				},
 			},
-			validationError: "unsupported operation OPERATION_IN in filter timestamp",
+			validationError: "unsupported operation",
 		},
 		{
 			name: "string fields only accept strings",
@@ -277,7 +277,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 					Values:    toFilterIntValues([]int32{1, 2, 3}),
 				},
 			},
-			validationError: "unsupported values *filters.Filter_IntValues for filter agent_id",
+			validationError: "unsupported values",
 		},
 		{
 			name: "categorical fields only accept categorical operations",
@@ -288,7 +288,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 					Values:    toFilterStringValues([]string{"ok"}),
 				},
 			},
-			validationError: "unsupported operation OPERATION_LESS in filter agent_id",
+			validationError: "unsupported operation",
 		},
 		{
 			name: "int fields only accept ints",
@@ -299,7 +299,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 					Values:    toFilterStringValues([]string{"12:12:12 not a time"}),
 				},
 			},
-			validationError: "unsupported values *filters.Filter_StringValues for filter rank_id",
+			validationError: "unsupported values",
 		},
 		{
 			name: "missing values",
@@ -310,7 +310,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 					Values:    toFilterTimestampValues(nil),
 				},
 			},
-			validationError: "operation OPERATION_LESS in filter timestamp requires arguments",
+			validationError: "missing arguments",
 		},
 	}
 
@@ -318,7 +318,7 @@ func TestPostgresTrialLogsFetcher(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			insertFakeLogs(t, db, trialID, tc.logs)
 
-			fetcher, err := NewPostgresTrialLogsFetcher(db, 1, 0, tc.filters)
+			fetcher, err := NewTrialLogsFetcher(db, 1, 0, tc.filters)
 			if tc.validationError != "" {
 				assert.Assert(t, err != nil, "expected validation error but found none")
 				assert.ErrorContains(t, err, tc.validationError)

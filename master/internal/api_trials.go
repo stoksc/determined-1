@@ -2,6 +2,8 @@ package internal
 
 import (
 	"context"
+	"github.com/determined-ai/determined/master/internal/logs/fetchers"
+	pgfetchers "github.com/determined-ai/determined/master/internal/logs/fetchers/postgres"
 	"strconv"
 	"strings"
 	"time"
@@ -12,8 +14,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/logs"
-	"github.com/determined-ai/determined/master/internal/logs/fetchers"
-
 	"github.com/pkg/errors"
 
 	"github.com/determined-ai/determined/master/internal/api"
@@ -53,8 +53,11 @@ func (a *apiServer) TrialLogs(
 	}
 
 	offset, limit := api.EffectiveOffsetAndLimit(int(req.Offset), int(req.Limit), total)
-	fetcher, err := fetchers.NewPostgresTrialLogsFetcher(a.m.db, int(req.TrialId), offset, req.Filters)
-	if err != nil {
+	fetcher, err := pgfetchers.NewTrialLogsFetcher(a.m.db, int(req.TrialId), offset, req.Filters)
+	switch {
+	case errors.Is(err, fetchers.FilterError):
+		return status.Errorf(codes.InvalidArgument, err.Error())
+	case err != nil:
 		return err
 	}
 
