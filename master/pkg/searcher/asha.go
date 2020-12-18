@@ -1,6 +1,7 @@
 package searcher
 
 import (
+	"encoding/json"
 	"math"
 	"sort"
 
@@ -12,18 +13,23 @@ import (
 // AsyncHalvingSearch implements a search using the asynchronous successive halving algorithm
 // (ASHA). The experiment will run until the target number of trials have been completed
 // in the bottom rung and no further promotions can be made to higher rungs.
-type asyncHalvingSearch struct {
-	defaultSearchMethod
-	model.AsyncHalvingConfig
+type (
+	asyncHalvingSearchState struct {
+		rungs      []*rung
+		trialRungs map[RequestID]int
+		// earlyExitTrials contains trials that exited early that are still considered in the search.
+		earlyExitTrials map[RequestID]bool
+		closedTrials    map[RequestID]bool
+		maxTrials       int
+		trialsCompleted int
+	}
 
-	rungs      []*rung
-	trialRungs map[RequestID]int
-	// earlyExitTrials contains trials that exited early that are still considered in the search.
-	earlyExitTrials map[RequestID]bool
-	closedTrials    map[RequestID]bool
-	maxTrials       int
-	trialsCompleted int
-}
+	asyncHalvingSearch struct {
+		defaultSearchMethod
+		model.AsyncHalvingConfig
+		asyncHalvingSearchState
+	}
+)
 
 const ashaExitedMetricValue = math.MaxFloat64
 
@@ -43,12 +49,22 @@ func newAsyncHalvingSearch(config model.AsyncHalvingConfig) SearchMethod {
 
 	return &asyncHalvingSearch{
 		AsyncHalvingConfig: config,
-		rungs:              rungs,
-		trialRungs:         make(map[RequestID]int),
-		earlyExitTrials:    make(map[RequestID]bool),
-		closedTrials:       make(map[RequestID]bool),
-		maxTrials:          config.MaxTrials,
+		asyncHalvingSearchState: asyncHalvingSearchState{
+			rungs:           rungs,
+			trialRungs:      make(map[RequestID]int),
+			earlyExitTrials: make(map[RequestID]bool),
+			closedTrials:    make(map[RequestID]bool),
+			maxTrials:       config.MaxTrials,
+		},
 	}
+}
+
+func (s *asyncHalvingSearch) save() ([]byte, error) {
+	return json.Marshal(s.asyncHalvingSearchState)
+}
+
+func (s *asyncHalvingSearch) load(state []byte) error {
+	return json.Unmarshal(state, &s.asyncHalvingSearchState)
 }
 
 // promotions handles bookkeeping of validation metrics and returns a RequestID to promote if

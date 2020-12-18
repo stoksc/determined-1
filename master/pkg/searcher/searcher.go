@@ -161,3 +161,15 @@ func (s *Searcher) UncommittedEvents() []Event {
 	defer func() { s.eventLog.uncommitted = nil }()
 	return s.eventLog.uncommitted
 }
+
+// Save returns a searchers current state.
+func (s *Searcher) Save() ([]byte, error) {
+	return s.method.save()
+}
+
+// Load loads a searcher from prior state.
+func (s *Searcher) Load(state []byte, exp model.Experiment) error {
+	s.rand.Seed(exp.Config.Reproducibility.ExperimentSeed)
+	s.hparams = exp.Config.Hyperparameters
+	return s.method.load(state)
+}

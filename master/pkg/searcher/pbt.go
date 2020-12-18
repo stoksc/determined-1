@@ -1,6 +1,7 @@
 package searcher
 
 import (
+	"encoding/json"
 	"math"
 	"sort"
 
@@ -13,31 +14,46 @@ import (
 
 // PBTSearch implements population-based training (PBT). See https://arxiv.org/abs/1711.09846 for
 // details.
-type pbtSearch struct {
-	defaultSearchMethod
-	model.PBTConfig
+type (
+	pbtSearchState struct {
+		roundsCompleted      int
+		metrics              map[RequestID]float64
+		trialRoundsCompleted map[RequestID]int
+		trialParams          map[RequestID]hparamSample
+		waitingOps           map[Operation][]Operation
 
-	roundsCompleted      int
-	metrics              map[RequestID]float64
-	trialRoundsCompleted map[RequestID]int
-	trialParams          map[RequestID]hparamSample
-	waitingOps           map[Operation][]Operation
+		// earlyExitTrials contains trials that exited early that are still considered in the search.
+		earlyExitTrials map[RequestID]bool
+	}
 
-	// earlyExitTrials contains trials that exited early that are still considered in the search.
-	earlyExitTrials map[RequestID]bool
-}
+	pbtSearch struct {
+		defaultSearchMethod
+		model.PBTConfig
+		pbtSearchState
+	}
+)
 
 const pbtExitedMetricValue = math.MaxFloat64
 
 func newPBTSearch(config model.PBTConfig) SearchMethod {
 	return &pbtSearch{
-		PBTConfig:            config,
-		metrics:              make(map[RequestID]float64),
-		trialRoundsCompleted: make(map[RequestID]int),
-		trialParams:          make(map[RequestID]hparamSample),
-		waitingOps:           make(map[Operation][]Operation),
-		earlyExitTrials:      make(map[RequestID]bool),
+		PBTConfig: config,
+		pbtSearchState: pbtSearchState{
+			metrics:              make(map[RequestID]float64),
+			trialRoundsCompleted: make(map[RequestID]int),
+			trialParams:          make(map[RequestID]hparamSample),
+			waitingOps:           make(map[Operation][]Operation),
+			earlyExitTrials:      make(map[RequestID]bool),
+		},
 	}
+}
+
+func (s *pbtSearch) save() ([]byte, error) {
+	return json.Marshal(s.pbtSearchState)
+}
+
+func (s *pbtSearch) load(state []byte) error {
+	return json.Unmarshal(state, &s.pbtSearchState)
 }
 
 func (s *pbtSearch) initialOperations(ctx context) ([]Operation, error) {

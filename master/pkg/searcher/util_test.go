@@ -385,10 +385,23 @@ func simulateOperationComplete(
 		if err != nil {
 			return nil, errors.Wrap(err, "checkpointCompleted")
 		}
+		if err = saveAndReload(method); err != nil {
+			return nil, errors.Wrap(err, "error saving searcher state after checkpoint")
+		}
 
 	default:
 		return nil, errors.Errorf("invalid runnable %q", operation)
 	}
 
 	return ops, nil
+}
+
+func saveAndReload(method SearchMethod) error {
+	// take the state back and forth through a round of serialization to test.
+	if state, err := method.save(); err != nil {
+		return err
+	} else if err := method.load(state); err != nil {
+		return err
+	}
+	return nil
 }

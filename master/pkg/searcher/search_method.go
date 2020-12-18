@@ -46,6 +46,11 @@ type SearchMethod interface {
 	trialExitedEarly(
 		ctx context, requestID RequestID, exitedReason workload.ExitedReason,
 	) ([]Operation, error)
+	// NOTE: searcher has to handle deser because only it knows appropriate types.
+	// save returns the search method's current state.
+	save() ([]byte, error)
+	// load restores the search method from a previous state.
+	load([]byte) error
 	// SearchMethod embeds the InUnits interface because it is in terms of a specific unit.
 	model.InUnits
 }
@@ -102,4 +107,14 @@ func (defaultSearchMethod) trialClosed(context, RequestID) ([]Operation, error) 
 func (defaultSearchMethod) trialExitedEarly( //nolint: unused
 	context, RequestID, workload.ExitedReason) ([]Operation, error) {
 	return []Operation{Shutdown{Failure: true}}, nil
+}
+
+// save is the default implementation, used by stateless searchers like random and grid.
+func (defaultSearchMethod) save() ([]byte, error) {
+	return nil, nil
+}
+
+// load is the default implementation, used by stateless searchers like random and grid.
+func (defaultSearchMethod) load([]byte) error {
+	return nil
 }

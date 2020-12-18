@@ -1,24 +1,43 @@
 package searcher
 
 import (
+	"encoding/json"
+
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/workload"
 )
 
 // tournamentSearch runs multiple search methods in tandem. Callbacks for completed operations
 // are sent to the originating search method that created the corresponding operation.
-type tournamentSearch struct {
-	subSearches             []SearchMethod
-	subSearchUnitsCompleted map[SearchMethod]float64
-	trialTable              map[RequestID]SearchMethod
-}
+type (
+	tournamentSearchState struct {
+		subSearchUnitsCompleted map[SearchMethod]float64
+		trialTable              map[RequestID]SearchMethod
+		subSearchStates         [][]byte
+	}
+	tournamentSearch struct {
+		subSearches []SearchMethod
+		tournamentSearchState
+	}
+)
 
 func newTournamentSearch(subSearches ...SearchMethod) *tournamentSearch {
 	return &tournamentSearch{
-		subSearches:             subSearches,
-		subSearchUnitsCompleted: make(map[SearchMethod]float64),
-		trialTable:              make(map[RequestID]SearchMethod),
+		subSearches: subSearches,
+		tournamentSearchState: tournamentSearchState{
+			subSearchUnitsCompleted: make(map[SearchMethod]float64),
+			trialTable:              make(map[RequestID]SearchMethod),
+			subSearchStates:         nil,
+		},
 	}
+}
+
+func (s *tournamentSearch) save() ([]byte, error) {
+	return json.Marshal(s.tournamentSearchState)
+}
+
+func (s *tournamentSearch) load(state []byte) error {
+	return json.Unmarshal(state, &s.tournamentSearchState)
 }
 
 func (s *tournamentSearch) initialOperations(ctx context) ([]Operation, error) {
