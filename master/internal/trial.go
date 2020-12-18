@@ -567,7 +567,11 @@ func (t *trial) processAllocated(
 	case err != nil:
 		return errors.Wrap(err, "Error completing cached checkpoints")
 	case op != nil:
-		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics})
+		b, err := t.sequencer.save()
+		if err != nil {
+			return errors.Wrap(err, "failed to snapshot trial workload sequencer")
+		}
+		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics, true, b})
 	}
 
 	w, err := t.sequencer.Workload()
@@ -655,15 +659,33 @@ func (t *trial) processCompletedWorkload(ctx *actor.Context, msg workload.Comple
 	case err != nil:
 		return errors.Wrap(err, "Error passing completed message to sequencer")
 	case op != nil:
-		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics})
+		signalSearcher := trialCompletedOperation{
+			trialID: t.id,
+			op:      op,
+			metrics: metrics,
+		}
+		if _, ok := op.(searcher.Checkpoint); ok {
+			b, err := t.sequencer.save()
+			if err != nil {
+				return errors.Wrap(err, "failed to snapshot trial workload sequencer")
+			}
+			signalSearcher.snapshotted = true
+			signalSearcher.snapshot = b
+		}
+		ctx.Tell(ctx.Self().Parent(), signalSearcher)
 		completedSearcherOp = true
 	}
 
+	// TODO: always try to complete cached checkpoints on startup
 	switch op, metrics, err = t.sequencer.CompleteCachedCheckpoints(); {
 	case err != nil:
 		return errors.Wrap(err, "Error completing cached checkpoints")
 	case op != nil:
-		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics})
+		b, err := t.sequencer.save()
+		if err != nil {
+			return errors.Wrap(err, "failed to snapshot trial workload sequencer")
+		}
+		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics, true, b})
 		completedSearcherOp = true
 	}
 

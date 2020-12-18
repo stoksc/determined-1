@@ -1,0 +1,1 @@
+DROP TABLE public.searcher_snapshots;

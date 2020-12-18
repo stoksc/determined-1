@@ -28,9 +28,11 @@ type (
 		trialID int
 	}
 	trialCompletedOperation struct {
-		trialID int
-		op      searcher.Runnable
-		metrics interface{}
+		trialID     int
+		op          searcher.Runnable
+		metrics     interface{}
+		snapshotted bool
+		snapshot    []byte
 	}
 	trialCompletedWorkload struct {
 		trialID          int
@@ -316,6 +318,16 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 	case trialCompletedOperation:
 		ops, err := e.searcher.OperationCompleted(msg.trialID, msg.op, msg.metrics)
 		e.processOperations(ctx, ops, err)
+		// TODO: do less stuff before we save our progress
+		if msg.snapshotted {
+			b, err := e.searcher.Save()
+			if err != nil {
+				return err
+			}
+			if err := e.db.SaveSnapshot(e.ID, msg.trialID, b, msg.snapshot); err != nil {
+				return err
+			}
+		}
 	case trialCompletedWorkload:
 		e.searcher.WorkloadCompleted(msg.completedMessage, msg.unitsCompleted)
 		e.processOperations(ctx, nil, nil) // We call processOperations to flush searcher events.

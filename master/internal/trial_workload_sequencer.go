@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"math"
 
 	"github.com/determined-ai/determined/master/pkg/workload"
@@ -102,6 +103,14 @@ func newTrialWorkloadSequencer(
 		create:         create,
 		experiment:     exp,
 	}
+}
+
+func (s *trialWorkloadSequencer) save() ([]byte, error) {
+	return json.Marshal(s.trialWorkloadSequencerState)
+}
+
+func (s *trialWorkloadSequencer) load(state []byte) error {
+	return json.Unmarshal(state, s.trialWorkloadSequencerState)
 }
 
 func (s *trialWorkloadSequencer) SetTrialID(trialID int) {
