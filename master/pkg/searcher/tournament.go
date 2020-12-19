@@ -3,6 +3,8 @@ package searcher
 import (
 	"encoding/json"
 
+	"github.com/pkg/errors"
+
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/workload"
 )
@@ -12,7 +14,7 @@ import (
 type (
 	tournamentSearchState struct {
 		subSearchUnitsCompleted map[SearchMethod]float64
-		trialTable              map[RequestID]SearchMethod
+		trialTable              map[model.RequestID]SearchMethod
 		subSearchStates         [][]byte
 	}
 	tournamentSearch struct {
@@ -26,18 +28,37 @@ func newTournamentSearch(subSearches ...SearchMethod) *tournamentSearch {
 		subSearches: subSearches,
 		tournamentSearchState: tournamentSearchState{
 			subSearchUnitsCompleted: make(map[SearchMethod]float64),
-			trialTable:              make(map[RequestID]SearchMethod),
-			subSearchStates:         nil,
+			trialTable:              make(map[model.RequestID]SearchMethod),
+			subSearchStates:         make([][]byte, len(subSearches)),
 		},
 	}
 }
 
 func (s *tournamentSearch) save() ([]byte, error) {
+	for i := range s.subSearches {
+		b, err := s.subSearches[i].save()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to save subsearch")
+		}
+		s.subSearchStates[i] = b
+	}
 	return json.Marshal(s.tournamentSearchState)
 }
 
 func (s *tournamentSearch) load(state []byte) error {
-	return json.Unmarshal(state, &s.tournamentSearchState)
+	if state == nil {
+		return nil
+	}
+	err := json.Unmarshal(state, &s.tournamentSearchState)
+	if err != nil {
+		return errors.Wrap(err, "failed to unmarshal tournament state")
+	}
+	for i := range s.subSearches {
+		if err := s.subSearches[i].load(s.subSearchStates[i]); err != nil {
+			return errors.Wrap(err, "failed to load subsearch")
+		}
+	}
+	return nil
 }
 
 func (s *tournamentSearch) initialOperations(ctx context) ([]Operation, error) {
@@ -53,14 +74,14 @@ func (s *tournamentSearch) initialOperations(ctx context) ([]Operation, error) {
 	return operations, nil
 }
 
-func (s *tournamentSearch) trialCreated(ctx context, requestID RequestID) ([]Operation, error) {
+func (s *tournamentSearch) trialCreated(ctx context, requestID model.RequestID) ([]Operation, error) {
 	subSearch := s.trialTable[requestID]
 	ops, err := subSearch.trialCreated(ctx, requestID)
 	return s.markCreates(subSearch, ops), err
 }
 
 func (s *tournamentSearch) trainCompleted(
-	ctx context, requestID RequestID, train Train,
+	ctx context, requestID model.RequestID, train Train,
 ) ([]Operation, error) {
 	subSearch := s.trialTable[requestID]
 	s.subSearchUnitsCompleted[subSearch] += float64(train.Length.Units)
@@ -69,7 +90,7 @@ func (s *tournamentSearch) trainCompleted(
 }
 
 func (s *tournamentSearch) checkpointCompleted(
-	ctx context, requestID RequestID, checkpoint Checkpoint, metrics workload.CheckpointMetrics,
+	ctx context, requestID model.RequestID, checkpoint Checkpoint, metrics workload.CheckpointMetrics,
 ) ([]Operation, error) {
 	subSearch := s.trialTable[requestID]
 	ops, err := subSearch.checkpointCompleted(ctx, requestID, checkpoint, metrics)
@@ -77,7 +98,7 @@ func (s *tournamentSearch) checkpointCompleted(
 }
 
 func (s *tournamentSearch) validationCompleted(
-	ctx context, requestID RequestID, validate Validate, metrics workload.ValidationMetrics,
+	ctx context, requestID model.RequestID, validate Validate, metrics workload.ValidationMetrics,
 ) ([]Operation, error) {
 	subSearch := s.trialTable[requestID]
 	ops, err := subSearch.validationCompleted(ctx, requestID, validate, metrics)
@@ -85,14 +106,14 @@ func (s *tournamentSearch) validationCompleted(
 }
 
 // trialClosed informs the searcher that the trial has been closed as a result of a Close operation.
-func (s *tournamentSearch) trialClosed(ctx context, requestID RequestID) ([]Operation, error) {
+func (s *tournamentSearch) trialClosed(ctx context, requestID model.RequestID) ([]Operation, error) {
 	subSearch := s.trialTable[requestID]
 	ops, err := subSearch.trialClosed(ctx, requestID)
 	return s.markCreates(subSearch, ops), err
 }
 
 func (s *tournamentSearch) trialExitedEarly(
-	ctx context, requestID RequestID, exitedReason workload.ExitedReason,
+	ctx context, requestID model.RequestID, exitedReason workload.ExitedReason,
 ) ([]Operation, error) {
 	subSearch := s.trialTable[requestID]
 	ops, err := subSearch.trialExitedEarly(ctx, requestID, exitedReason)

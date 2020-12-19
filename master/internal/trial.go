@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/apex/log"
+
 	"github.com/determined-ai/determined/master/pkg/workload"
 
 	"github.com/gorilla/websocket"
@@ -92,8 +94,8 @@ type (
 	}
 
 	// When we issue a TERMINATE workload, we send a delayed terminateTimeout message with a record
-	// of the number of runID that the trial had at the time we issued the TERMINATE. If we
-	// receive the terminateTimeout message and t.runID has not changed, we forcibly kill the
+	// of the number of RunID that the trial had at the time we issued the TERMINATE. If we
+	// receive the terminateTimeout message and t.RunID has not changed, we forcibly kill the
 	// running containers.
 	terminateTimeout struct{ runID int }
 
@@ -160,73 +162,81 @@ type terminatedContainerWithState struct {
 	needsCheckpoint            bool
 }
 
-// trial is an actor which is responsible for handling:
-//  - messages from the scheduler,
-//  - messages from the experiment,
-//  - messages from the trial container(s),
-//  - replay logic, and
-//  - keeping the trial table of the database up-to-date.
-//
-// It is not responsible for maintaining the current state of the task running in the trial
-// container, or the desired state as described by searcher operations; that is offloaded onto the
-// workloadSequencer.
-type trial struct {
-	id    int
-	idSet bool
+type (
+	// trialState keeps all the state of the trial that we persist between failures
+	trialState struct {
+		TrialWorkloadSequencerState []byte
 
-	rm              *actor.Ref
-	logger          *actor.Ref
-	db              *db.PgDB
-	experimentState model.State
-	experiment      *model.Experiment
-	modelDefinition archive.Archive
+		// restarts is essentially a failure count, it increments when the trial fails and we retry it.
+		Restarts int
 
-	warmStartCheckpointID *int
+		// RunID is a count of how many times the task container(s) have stopped and restarted, which
+		// could be due to a failure or due to normal pausing and continuing. When RunID increments,
+		// it effectively invalidates any outstanding terminateTimeout messages so that we don't
+		// accidentally kill a fresh container due to the terminateTimeout message from an older
+		// container.
+		RunID int
 
-	create searcher.Create
-	close  *searcher.Close
+		// The following fields tracks the reasons for termination.
+		EarlyExit                  bool
+		PendingGracefulTermination bool
+		TerminationSent            bool
+		CancelUnready              bool
+		Killed                     bool
+	}
 
-	sequencer *trialWorkloadSequencer
+	// trial is an actor which is responsible for handling:
+	//  - messages from the scheduler,
+	//  - messages from the experiment,
+	//  - messages from the trial container(s),
+	//  - replay logic, and
+	//  - keeping the trial table of the database up-to-date.
+	//
+	// It is not responsible for maintaining the current state of the task running in the trial
+	// container, or the desired state as described by searcher operations; that is offloaded onto the
+	// workloadSequencer.
+	trial struct {
+		trialState
+		id    int
+		idSet bool
 
-	// restarts is essentially a failure count, it increments when the trial fails and we retry it.
-	restarts int
+		rm              *actor.Ref
+		logger          *actor.Ref
+		db              *db.PgDB
+		experimentState model.State
+		experiment      *model.Experiment
+		modelDefinition archive.Archive
 
-	// runID is a count of how many times the task container(s) have stopped and restarted, which
-	// could be due to a failure or due to normal pausing and continuing. When runID increments,
-	// it effectively invalidates any outstanding terminateTimeout messages so that we don't
-	// accidentally kill a fresh container due to the terminateTimeout message from an older
-	// container.
-	runID int
+		warmStartCheckpointID *int
 
-	replaying bool
+		create searcher.Create
+		close  *searcher.Close
 
-	// The following fields tracks the reasons for termination.
-	earlyExit                  bool
-	pendingGracefulTermination bool
-	terminationSent            bool
-	cancelUnready              bool
-	killed                     bool
+		sequencer *trialWorkloadSequencer
 
-	// The following fields tracks the interaction with the resource providers.
-	task        *resourcemanagers.AllocateRequest
-	allocations []resourcemanagers.Allocation
+		restoring bool
 
-	// The following fields tracks containers and their states.
-	lastContainerConnectedTime time.Time
-	startedContainers          map[cproto.ID]bool
-	containers                 map[cproto.ID]cproto.Container // only for running containers.
-	containerRanks             map[cproto.ID]int              // only for launched containers.
-	containerAddresses         map[cproto.ID][]cproto.Address // only for running containers.
-	containerSockets           map[cproto.ID]*actor.Ref       // only for running containers.
-	terminatedContainers       map[cproto.ID]terminatedContainerWithState
-	// tracks if allReady check has passed successfully.
-	allReadySucceeded bool
+		// The following fields tracks the interaction with the resource providers.
+		task        *resourcemanagers.AllocateRequest
+		allocations []resourcemanagers.Allocation
 
-	agentUserGroup *model.AgentUserGroup
-	taskSpec       *tasks.TaskSpec
-	privateKey     []byte
-	publicKey      []byte
-}
+		// The following fields tracks containers and their states.
+		lastContainerConnectedTime time.Time
+		startedContainers          map[cproto.ID]bool
+		containers                 map[cproto.ID]cproto.Container // only for running containers.
+		containerRanks             map[cproto.ID]int              // only for launched containers.
+		containerAddresses         map[cproto.ID][]cproto.Address // only for running containers.
+		containerSockets           map[cproto.ID]*actor.Ref       // only for running containers.
+		terminatedContainers       map[cproto.ID]terminatedContainerWithState
+		// tracks if allReady check has passed successfully.
+		allReadySucceeded bool
+
+		agentUserGroup *model.AgentUserGroup
+		taskSpec       *tasks.TaskSpec
+		privateKey     []byte
+		publicKey      []byte
+	}
+)
 
 // newTrial creates a trial which will try to schedule itself after it receives its first workload.
 func newTrial(
@@ -251,7 +261,7 @@ func newTrial(
 		sequencer: newTrialWorkloadSequencer(exp.Experiment, create, firstCheckpoint),
 
 		create:    create,
-		replaying: exp.replaying,
+		restoring: exp.restoring,
 
 		startedContainers:    make(map[cproto.ID]bool),
 		containers:           make(map[cproto.ID]cproto.Container),
@@ -284,13 +294,8 @@ func (t *trial) Receive(ctx *actor.Context) error {
 			}
 		}
 
-	// Restoration-related messages.
-	case trialCreated:
-		t.processID(ctx, msg.trialID)
-		ctx.Tell(ctx.Self().Parent(), msg)
 	case restoreTrial:
-		t.restore(ctx)
-		t.replaying = false
+		return t.restore(ctx)
 
 	case sproto.ContainerLog:
 		t.processContainerLog(ctx, msg)
@@ -304,27 +309,23 @@ func (t *trial) Receive(ctx *actor.Context) error {
 		if !t.idSet {
 			return nil
 		}
-		if t.restarts > t.experiment.Config.MaxRestarts {
-			if !t.replaying {
-				if err := t.db.UpdateTrial(t.id, model.ErrorState); err != nil {
-					ctx.Log().Error(err)
-				}
+		if t.Restarts > t.experiment.Config.MaxRestarts {
+			if err := t.db.UpdateTrial(t.id, model.ErrorState); err != nil {
+				ctx.Log().Error(err)
 			}
 			return errors.Errorf("trial %d failed and reached maximum number of restarts", t.id)
 		}
 		ctx.Log().Info("trial stopped successfully")
 		endState := model.CompletedState
-		if t.experimentState == model.StoppingCanceledState || t.killed {
+		if t.experimentState == model.StoppingCanceledState || t.Killed {
 			endState = model.CanceledState
 		}
-		if !t.replaying {
-			if err := t.db.UpdateTrial(t.id, endState); err != nil {
-				ctx.Log().Error(err)
-			}
+		if err := t.db.UpdateTrial(t.id, endState); err != nil {
+			ctx.Log().Error(err)
 		}
 		return nil
 	default:
-		if t.task != nil || t.replaying {
+		if t.task != nil {
 			if err := t.runningReceive(ctx); err != nil {
 				return err
 			}
@@ -334,8 +335,7 @@ func (t *trial) Receive(ctx *actor.Context) error {
 	if t.task == nil {
 		if t.trialClosing() {
 			ctx.Self().Stop()
-		} else if !t.sequencer.UpToDate() && t.experimentState == model.ActiveState &&
-			!t.replaying {
+		} else if !t.sequencer.UpToDate() && t.experimentState == model.ActiveState {
 			slotsNeeded := t.experiment.Config.Resources.SlotsPerTrial
 			label := t.experiment.Config.Resources.AgentLabel
 			resourcePool := t.experiment.Config.Resources.ResourcePool
@@ -388,8 +388,8 @@ func (t *trial) runningReceive(ctx *actor.Context) error {
 		}
 
 	case sendNextWorkload:
-		if msg.runID != t.runID {
-			ctx.Log().Warnf("ignoring sendNextWorkload with stale runID %d", msg.runID)
+		if msg.runID != t.RunID {
+			ctx.Log().Warnf("ignoring sendNextWorkload with stale RunID %d", msg.runID)
 			return nil
 		}
 		if err := t.sendNextWorkload(ctx); err != nil {
@@ -402,11 +402,11 @@ func (t *trial) runningReceive(ctx *actor.Context) error {
 
 	case killTrial:
 		ctx.Log().Info("received killing request")
-		t.killed = true
+		t.Killed = true
 		t.terminate(ctx, true)
 
 	case allReadyTimeout:
-		if msg.runID == t.runID &&
+		if msg.runID == t.RunID &&
 			time.Now().After(t.lastContainerConnectedTime.Add(allReadyTimeoutPeriod)) {
 			ctx.Tell(t.logger, model.TrialLog{
 				TrialID: t.id, Message: "some containers are taking a long time to " +
@@ -418,7 +418,7 @@ func (t *trial) runningReceive(ctx *actor.Context) error {
 		}
 
 	case terminateTimeout:
-		if msg.runID == t.runID {
+		if msg.runID == t.RunID {
 			ctx.Log().Info("forcibly terminating unresponsive trial after timeout expired")
 			t.terminate(ctx, true)
 		}
@@ -451,7 +451,7 @@ func (t *trial) processSchedulerMsg(ctx *actor.Context) error {
 
 func (t *trial) releaseResource(ctx *actor.Context) error {
 	if !t.allReady(ctx) {
-		t.cancelUnready = true
+		t.CancelUnready = true
 		t.terminate(ctx, true)
 	} else {
 		t.terminate(ctx, false)
@@ -494,7 +494,7 @@ func (t *trial) processAPIMsg(ctx *actor.Context) error {
 
 	case *apiv1.KillTrialRequest:
 		ctx.Log().Info("received API request to kill trial")
-		t.killed = true
+		t.Killed = true
 		t.terminate(ctx, true)
 		ctx.Respond(&apiv1.KillTrialResponse{})
 
@@ -537,6 +537,7 @@ func (t *trial) processAllocated(
 	}
 	if !t.idSet {
 		modelTrial := model.NewTrial(
+			t.create.RequestID,
 			t.experiment.ID,
 			model.JSONObj(t.create.Hparams),
 			t.warmStartCheckpointID,
@@ -559,19 +560,6 @@ func (t *trial) processAllocated(
 			TaskHandler: ctx.Self(),
 		})
 		ctx.Tell(ctx.Self().Parent(), trialCreated{create: t.create, trialID: t.id})
-	}
-
-	// We need to complete cached checkpoints here in the event that between when we last shutdown
-	// and now the searcher asked for a checkpoint we already created (this happens in PBT).
-	switch op, metrics, err := t.sequencer.CompleteCachedCheckpoints(); {
-	case err != nil:
-		return errors.Wrap(err, "Error completing cached checkpoints")
-	case op != nil:
-		b, err := t.sequencer.save()
-		if err != nil {
-			return errors.Wrap(err, "failed to snapshot trial workload sequencer")
-		}
-		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics, true, b})
 	}
 
 	w, err := t.sequencer.Workload()
@@ -627,7 +615,7 @@ func (t *trial) processAllocated(
 			ModelDefinition:     t.modelDefinition,
 			HParams:             t.create.Hparams,
 			TrialSeed:           t.create.TrialSeed,
-			LatestCheckpoint:    t.sequencer.LatestCheckpoint(),
+			LatestCheckpoint:    t.sequencer.LatestCheckpoint,
 			InitialWorkload:     w,
 			WorkloadManagerType: t.sequencer.WorkloadManagerType(),
 			AdditionalFiles:     additionalFiles,
@@ -642,8 +630,8 @@ func (t *trial) processAllocated(
 }
 
 func (t *trial) processCompletedWorkload(ctx *actor.Context, msg workload.CompletedMessage) error {
-	if !t.replaying && (msg.ExitedReason == nil ||
-		*msg.ExitedReason == workload.UserCanceled || *msg.ExitedReason == workload.InvalidHP) {
+	if msg.ExitedReason == nil || *msg.ExitedReason == workload.UserCanceled ||
+		*msg.ExitedReason == workload.InvalidHP {
 		if err := markWorkloadCompleted(t.db, msg); err != nil {
 			ctx.Log().Error(err)
 		}
@@ -653,55 +641,45 @@ func (t *trial) processCompletedWorkload(ctx *actor.Context, msg workload.Comple
 
 	completedSearcherOp := false
 	units := model.UnitsFromBatches(msg.Workload.NumBatches, t.sequencer.unitContext)
-	isBestValidation := ctx.Ask(ctx.Self().Parent(), trialCompletedWorkload{t.id, msg, units})
+	isBestValidation := ctx.Ask(ctx.Self().Parent(), trialCompletedWorkload{
+		trialID:          t.id,
+		completedMessage: msg,
+		unitsCompleted:   units,
+	})
 	op, metrics, err := t.sequencer.WorkloadCompleted(msg, isBestValidation)
 	switch {
 	case err != nil:
 		return errors.Wrap(err, "Error passing completed message to sequencer")
 	case op != nil:
-		signalSearcher := trialCompletedOperation{
+		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{
 			trialID: t.id,
 			op:      op,
 			metrics: metrics,
-		}
-		if _, ok := op.(searcher.Checkpoint); ok {
-			b, err := t.sequencer.save()
-			if err != nil {
-				return errors.Wrap(err, "failed to snapshot trial workload sequencer")
-			}
-			signalSearcher.snapshotted = true
-			signalSearcher.snapshot = b
-		}
-		ctx.Tell(ctx.Self().Parent(), signalSearcher)
-		completedSearcherOp = true
-	}
-
-	// TODO: always try to complete cached checkpoints on startup
-	switch op, metrics, err = t.sequencer.CompleteCachedCheckpoints(); {
-	case err != nil:
-		return errors.Wrap(err, "Error completing cached checkpoints")
-	case op != nil:
-		b, err := t.sequencer.save()
-		if err != nil {
-			return errors.Wrap(err, "failed to snapshot trial workload sequencer")
-		}
-		ctx.Tell(ctx.Self().Parent(), trialCompletedOperation{t.id, op, metrics, true, b})
+		})
 		completedSearcherOp = true
 	}
 
 	if msg.ExitedReason != nil {
 		ctx.Log().Infof("exiting trial early: %v", msg.ExitedReason)
 		ctx.Tell(ctx.Self().Parent(), trialExitedEarly{t.id, msg.ExitedReason})
-		t.earlyExit = true
+		t.EarlyExit = true
 		if *msg.ExitedReason == workload.Errored {
 			return nil
+		}
+	}
+
+	if msg.Workload.Kind == workload.CheckpointModel {
+		if b, err := t.save(); err != nil {
+			return err
+		} else {
+			ctx.Tell(ctx.Self().Parent(), trialSnapshot{t.id, b})
 		}
 	}
 
 	// If we completed a searcher operation, synchronize with the searcher to allow it to relay any
 	// new operations to the trial. Otherwise just continue the trial immediately.
 	if completedSearcherOp {
-		ctx.Tell(ctx.Self().Parent(), sendNextWorkload{runID: t.runID})
+		ctx.Tell(ctx.Self().Parent(), sendNextWorkload{runID: t.RunID})
 		return nil
 	}
 	return t.sendNextWorkload(ctx)
@@ -713,7 +691,7 @@ func (t *trial) sendNextWorkload(ctx *actor.Context) error {
 	var err error
 	switch {
 	// We have another workload to run.
-	case !t.pendingGracefulTermination && !t.sequencer.UpToDate():
+	case !t.PendingGracefulTermination && !t.sequencer.UpToDate():
 		w, err = t.sequencer.Workload()
 		if err != nil {
 			return errors.Wrap(err, "error getting workload from sequencer")
@@ -737,32 +715,30 @@ func (t *trial) sendNextWorkload(ctx *actor.Context) error {
 	}
 
 	// Command the trial runner to do the thing we decided on (if this is not a replay).
-	if !t.replaying {
-		var msg interface{}
-		if terminateNow {
-			w = *t.sequencer.TerminateWorkload()
-			msg = &trialMessage{
-				RunWorkload: &runWorkload{
-					Workload: w,
-				},
-			}
-
-			t.terminationSent = true
-			actors.NotifyAfter(ctx, terminateTimeoutPeriod, terminateTimeout{runID: t.runID})
-		} else {
-			if err := saveWorkload(t.db, w); err != nil {
-				ctx.Log().WithError(err).Error("failed to save workload to the database")
-			}
-			msg = &trialMessage{
-				RunWorkload: &runWorkload{
-					Workload: w,
-				},
-			}
+	var msg interface{}
+	if terminateNow {
+		w = *t.sequencer.TerminateWorkload()
+		msg = &trialMessage{
+			RunWorkload: &runWorkload{
+				Workload: w,
+			},
 		}
-		for _, socket := range t.containerSockets {
-			if err := api.WriteSocketJSON(ctx, socket, msg); err != nil {
-				ctx.Log().WithError(err).Error("cannot write to websocket")
-			}
+
+		t.TerminationSent = true
+		actors.NotifyAfter(ctx, terminateTimeoutPeriod, terminateTimeout{runID: t.RunID})
+	} else {
+		if err := saveWorkload(t.db, w); err != nil {
+			ctx.Log().WithError(err).Error("failed to save workload to the database")
+		}
+		msg = &trialMessage{
+			RunWorkload: &runWorkload{
+				Workload: w,
+			},
+		}
+	}
+	for _, socket := range t.containerSockets {
+		if err := api.WriteSocketJSON(ctx, socket, msg); err != nil {
+			ctx.Log().WithError(err).Error("cannot write to websocket")
 		}
 	}
 	return nil
@@ -771,7 +747,7 @@ func (t *trial) sendNextWorkload(ctx *actor.Context) error {
 func (t *trial) processContainerConnected(ctx *actor.Context, msg containerConnected) error {
 	t.lastContainerConnectedTime = time.Now()
 	if len(t.containers) < len(t.allocations) {
-		actors.NotifyAfter(ctx, allReadyTimeoutPeriod, allReadyTimeout{runID: t.runID})
+		actors.NotifyAfter(ctx, allReadyTimeoutPeriod, allReadyTimeout{runID: t.RunID})
 	}
 
 	// Check to make sure this is not a connection from a stale container.
@@ -950,7 +926,7 @@ func (t *trial) processContainerTerminated(
 	t.terminatedContainers[msg.Container.ID] = terminatedContainerWithState{
 		exitStatus:                 *msg.ContainerStopped,
 		isLeader:                   t.containerRanks[msg.Container.ID] == 0,
-		pendingGracefulTermination: t.pendingGracefulTermination,
+		pendingGracefulTermination: t.PendingGracefulTermination,
 		needsCheckpoint:            t.sequencer.PrecloseCheckpointWorkload() != nil,
 	}
 
@@ -1035,35 +1011,53 @@ func classifyStatus(state terminatedContainerWithState) aproto.ContainerStopped 
 	}
 }
 
-func (t *trial) restore(ctx *actor.Context) {
-	// If the trial has not been created in the database yet (which can happen during master restart),
-	// it can't have any state to restore.
-	if !t.idSet {
-		return
+func (t *trial) restore(ctx *actor.Context) error {
+	ctx.Log().Info("restoring trial")
+	defer func() { t.restoring = false }()
+	switch trial, err := t.db.TrialByRequestID(t.create.RequestID); {
+	case errors.Cause(err) == db.ErrNotFound:
+		ctx.Log().Info("trial was never previously allocated in restore")
+		return nil
+	case err != nil:
+		return errors.Wrap(err, "failed to retreive trial snapshot")
+	default:
+		ctx.Log().Info("processes trial ID", trial)
+		t.processID(ctx, trial.ID)
+		if _, ok := model.TerminalStates[trial.State]; ok {
+			ctx.Self().Stop()
+			return nil
+		}
 	}
 
-	trial, err := t.db.TrialByID(t.id)
-	if err != nil {
+	switch snapshot, err := t.db.TrialSnapshot(t.create.RequestID); {
+	case errors.Cause(err) == db.ErrNotFound:
+		ctx.Log().Info("trial was previously allocated but had no snapshot")
+		return nil
+	case err != nil:
+		return errors.Wrap(err, "failed to retreive trial snapshot")
+	default:
+		ctx.Log().Info("restoring trial from snapshot", string(snapshot))
+		if err := t.load(snapshot); err != nil {
+			return errors.Wrap(err, "failed to load trial snapshot")
+		}
+	}
+
+	if err := t.db.RollBackTrial(t.id, t.sequencer.CurStepID); err != nil {
 		ctx.Log().Error(err)
-	} else if _, ok := model.TerminalStates[trial.State]; ok {
-		ctx.Self().Stop()
-		return
 	}
+	return nil
+}
 
+func (t *trial) restart(ctx *actor.Context) {
 	step := t.sequencer.RollBackSequencer()
-
 	ctx.Log().Infof("restoring trial %d to end of step %d", t.id, step)
-
-	// Delete things in the database that are now invalid. (Even if the last completed
-	// step had its checkpoint done, the following step may have been started and thus
-	// added to the database already.)
-	if err := t.db.RollBackTrial(t.id, step); err != nil {
+	if err := t.db.RollBackTrial(t.id, t.sequencer.CurStepID); err != nil {
 		ctx.Log().Error(err)
 	}
 }
 
 func (t *trial) trialClosing() bool {
-	return t.earlyExit || t.killed || t.restarts > t.experiment.Config.MaxRestarts ||
+	return t.EarlyExit || t.Killed || t.Restarts > t.experiment.Config.MaxRestarts ||
 		(t.close != nil && t.sequencer.UpToDate()) ||
 		model.StoppingStates[t.experimentState]
 }
@@ -1081,9 +1075,9 @@ func (t *trial) terminate(ctx *actor.Context, kill bool) {
 				allocation.Kill(ctx)
 			}
 		}
-	case !t.pendingGracefulTermination:
+	case !t.PendingGracefulTermination:
 		ctx.Log().Info("gracefully terminating trial")
-		t.pendingGracefulTermination = true
+		t.PendingGracefulTermination = true
 	}
 }
 
@@ -1102,15 +1096,15 @@ func (t *trial) terminated(ctx *actor.Context) {
 	status := aproto.ContainerError(aproto.AgentError, errors.New("no error status provided"))
 	if len(t.startedContainers) == 0 {
 		// If there are no containers started executing, consider as aborted.
-		// The trial state will be reset.
+		// The trial state will be restart.
 		status = aproto.ContainerError(aproto.TaskAborted, errors.New("task aborted"))
 	} else if leaderState, ok := getLeaderState(); ok {
 		status = classifyStatus(leaderState)
 	}
 
-	terminationSent := t.terminationSent
+	terminationSent := t.TerminationSent
 
-	t.runID++
+	t.RunID++
 
 	t.task = nil
 	t.allocations = nil
@@ -1118,8 +1112,8 @@ func (t *trial) terminated(ctx *actor.Context) {
 	ctx.Tell(t.rm, resourcemanagers.ResourcesReleased{TaskActor: ctx.Self()})
 
 	t.allReadySucceeded = false
-	t.pendingGracefulTermination = false
-	t.terminationSent = false
+	t.PendingGracefulTermination = false
+	t.TerminationSent = false
 	t.terminatedContainers = make(map[cproto.ID]terminatedContainerWithState)
 	t.startedContainers = make(map[cproto.ID]bool)
 
@@ -1132,13 +1126,13 @@ func (t *trial) terminated(ctx *actor.Context) {
 			"ignoring trial runner failure since termination was requested",
 		)
 		return
-	case t.cancelUnready:
+	case t.CancelUnready:
 		ctx.Log().WithField("failure", status.Failure).Info(
 			"ignoring trial runner failure since it was canceled or paused " +
 				"before all containers are connected",
 		)
 		return
-	case t.killed:
+	case t.Killed:
 		ctx.Log().WithField("failure", status.Failure).Info(
 			"ignoring trial runner failure since it was killed",
 		)
@@ -1149,10 +1143,10 @@ func (t *trial) terminated(ctx *actor.Context) {
 	}
 
 	ctx.Log().Errorf("unexpected failure of trial after restart %d/%d: %v",
-		t.restarts, t.experiment.Config.MaxRestarts, status)
-	t.restarts++
-	if t.restarts <= t.experiment.Config.MaxRestarts {
-		t.restore(ctx)
+		t.Restarts, t.experiment.Config.MaxRestarts, status)
+	t.Restarts++
+	if t.Restarts <= t.experiment.Config.MaxRestarts {
+		t.restart(ctx)
 		return
 	}
 
@@ -1170,12 +1164,10 @@ func (t *trial) terminated(ctx *actor.Context) {
 		panic("trial terminated due to failure but had nothing to fail")
 	}
 
-	if !t.replaying {
-		if err := markWorkloadErrored(t.db, w); err != nil {
-			ctx.Log().
-				WithError(err).
-				Error("failed to mark workload errored when terminated")
-		}
+	if err := markWorkloadErrored(t.db, w); err != nil {
+		ctx.Log().
+			WithError(err).
+			Error("failed to mark workload errored when terminated")
 	}
 
 	e := workload.Errored
@@ -1188,4 +1180,26 @@ func (t *trial) terminated(ctx *actor.Context) {
 			WithError(err).
 			Error("failed to process errored message")
 	}
+}
+
+func (t *trial) save() ([]byte, error) {
+	sequencerSnapshot, err := t.sequencer.save()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to snapshot trial workload sequencer")
+	}
+	log.Info(string(sequencerSnapshot))
+	t.TrialWorkloadSequencerState = sequencerSnapshot
+	trialSnapshot, err := json.Marshal(t.trialState)
+	return trialSnapshot, errors.Wrap(err, "failed to snapshot trial")
+}
+
+func (t *trial) load(snapshot []byte) error {
+	if err := json.Unmarshal(snapshot, &t.trialState); err != nil {
+		return errors.Wrap(err, "failed to unmarshal trial snapshot")
+	}
+	log.Info(string(t.TrialWorkloadSequencerState))
+	if err := t.sequencer.load(t.TrialWorkloadSequencerState); err != nil {
+		return errors.Wrap(err, "failed to load trial workload sequencer state")
+	}
+	return nil
 }

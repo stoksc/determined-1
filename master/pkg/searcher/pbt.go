@@ -16,14 +16,14 @@ import (
 // details.
 type (
 	pbtSearchState struct {
-		roundsCompleted      int
-		metrics              map[RequestID]float64
-		trialRoundsCompleted map[RequestID]int
-		trialParams          map[RequestID]hparamSample
-		waitingOps           map[Operation][]Operation
+		RoundsCompleted      int
+		Metrics              map[model.RequestID]float64
+		TrialRoundsCompleted map[model.RequestID]int
+		TrialParams          map[model.RequestID]hparamSample
+		WaitingOps           map[Operation][]Operation
 
-		// earlyExitTrials contains trials that exited early that are still considered in the search.
-		earlyExitTrials map[RequestID]bool
+		// EarlyExitTrials contains trials that exited early that are still considered in the search.
+		EarlyExitTrials map[model.RequestID]bool
 	}
 
 	pbtSearch struct {
@@ -39,11 +39,11 @@ func newPBTSearch(config model.PBTConfig) SearchMethod {
 	return &pbtSearch{
 		PBTConfig: config,
 		pbtSearchState: pbtSearchState{
-			metrics:              make(map[RequestID]float64),
-			trialRoundsCompleted: make(map[RequestID]int),
-			trialParams:          make(map[RequestID]hparamSample),
-			waitingOps:           make(map[Operation][]Operation),
-			earlyExitTrials:      make(map[RequestID]bool),
+			Metrics:              make(map[model.RequestID]float64),
+			TrialRoundsCompleted: make(map[model.RequestID]int),
+			TrialParams:          make(map[model.RequestID]hparamSample),
+			WaitingOps:           make(map[Operation][]Operation),
+			EarlyExitTrials:      make(map[model.RequestID]bool),
 		},
 	}
 }
@@ -53,6 +53,9 @@ func (s *pbtSearch) save() ([]byte, error) {
 }
 
 func (s *pbtSearch) load(state []byte) error {
+	if state == nil {
+		return nil
+	}
 	return json.Unmarshal(state, &s.pbtSearchState)
 }
 
@@ -61,7 +64,7 @@ func (s *pbtSearch) initialOperations(ctx context) ([]Operation, error) {
 	for trial := 0; trial < s.PopulationSize; trial++ {
 		create := NewCreate(
 			ctx.rand, sampleAll(ctx.hparams, ctx.rand), model.TrialWorkloadSequencerType)
-		s.trialParams[create.RequestID] = create.Hparams
+		s.TrialParams[create.RequestID] = create.Hparams
 		ops = append(ops, create)
 		ops = append(ops, NewTrain(create.RequestID, s.LengthPerRound))
 		ops = append(ops, NewValidate(create.RequestID))
@@ -70,7 +73,7 @@ func (s *pbtSearch) initialOperations(ctx context) ([]Operation, error) {
 }
 
 func (s *pbtSearch) validationCompleted(
-	ctx context, requestID RequestID, validate Validate, metrics workload.ValidationMetrics,
+	ctx context, requestID model.RequestID, validate Validate, metrics workload.ValidationMetrics,
 ) ([]Operation, error) {
 	// Extract the relevant metric as a float.
 	rawMetric := metrics.Metrics[s.Metric]
@@ -86,24 +89,24 @@ func (s *pbtSearch) validationCompleted(
 	if !s.SmallerIsBetter {
 		sign = -1.0
 	}
-	s.metrics[requestID] = metric * sign
+	s.Metrics[requestID] = metric * sign
 
 	return s.runNewTrials(ctx, requestID)
 }
 
-func (s *pbtSearch) runNewTrials(ctx context, requestID RequestID) ([]Operation, error) {
+func (s *pbtSearch) runNewTrials(ctx context, requestID model.RequestID) ([]Operation, error) {
 	var ops []Operation
 
-	s.trialRoundsCompleted[requestID]++
-	if len(s.metrics) < s.PopulationSize {
+	s.TrialRoundsCompleted[requestID]++
+	if len(s.Metrics) < s.PopulationSize {
 		return ops, nil
 	}
 
 	// We've finished all the rounds, so close everything.
-	s.roundsCompleted++
-	if s.roundsCompleted >= s.NumRounds {
-		for requestID := range s.metrics {
-			if !s.earlyExitTrials[requestID] {
+	s.RoundsCompleted++
+	if s.RoundsCompleted >= s.NumRounds {
+		for requestID := range s.Metrics {
+			if !s.EarlyExitTrials[requestID] {
 				ops = append(ops, NewClose(requestID))
 			}
 		}
@@ -115,25 +118,25 @@ func (s *pbtSearch) runNewTrials(ctx context, requestID RequestID) ([]Operation,
 	numTruncate := int(s.TruncateFraction * float64(s.PopulationSize))
 
 	// Sort trials by metric value.
-	trialIDs := make([]RequestID, 0, len(s.metrics))
-	for trialID := range s.metrics {
+	trialIDs := make([]model.RequestID, 0, len(s.Metrics))
+	for trialID := range s.Metrics {
 		trialIDs = append(trialIDs, trialID)
 	}
 	sort.Slice(trialIDs, func(i, j int) bool {
 		id1 := trialIDs[i]
 		id2 := trialIDs[j]
-		m1 := s.metrics[id1]
-		m2 := s.metrics[id2]
+		m1 := s.Metrics[id1]
+		m2 := s.Metrics[id2]
 		if m1 != m2 {
 			return m1 < m2
 		}
 		return id1.Before(id2)
 	})
-	s.metrics = make(map[RequestID]float64)
+	s.Metrics = make(map[model.RequestID]float64)
 
 	// Close the worst trials.
 	for i := len(trialIDs) - numTruncate; i < len(trialIDs); i++ {
-		if !s.earlyExitTrials[trialIDs[i]] {
+		if !s.EarlyExitTrials[trialIDs[i]] {
 			// TODO specify the right kind of ID for ops
 			ops = append(ops, NewClose(trialIDs[i]))
 		}
@@ -141,30 +144,30 @@ func (s *pbtSearch) runNewTrials(ctx context, requestID RequestID) ([]Operation,
 
 	// Checkpoint and copy the best trials.
 	for _, requestID := range trialIDs[:numTruncate] {
-		if !s.earlyExitTrials[requestID] {
+		if !s.EarlyExitTrials[requestID] {
 			checkpoint := NewCheckpoint(requestID)
 			ops = append(ops, checkpoint)
 
-			origParams := s.trialParams[requestID]
+			origParams := s.TrialParams[requestID]
 			newParams := s.exploreParams(ctx, origParams)
 
 			create := NewCreateFromCheckpoint(
 				ctx.rand, newParams, checkpoint, model.TrialWorkloadSequencerType)
-			s.trialParams[create.RequestID] = newParams
+			s.TrialParams[create.RequestID] = newParams
 
 			// The new trial cannot begin until the checkpoint has been completed.
-			s.waitingOps[checkpoint] = []Operation{create}
-			s.waitingOps[checkpoint] = append(s.waitingOps[checkpoint],
+			s.WaitingOps[checkpoint] = []Operation{create}
+			s.WaitingOps[checkpoint] = append(s.WaitingOps[checkpoint],
 				NewTrain(create.RequestID, s.LengthPerRound), NewValidate(create.RequestID))
 		}
 	}
 
 	// Continue all non-closed trials.
 	for _, requestID := range trialIDs[:len(trialIDs)-numTruncate] {
-		if !s.earlyExitTrials[requestID] {
+		if !s.EarlyExitTrials[requestID] {
 			ops = append(ops, NewTrain(requestID, s.LengthPerRound), NewValidate(requestID))
 		} else {
-			s.metrics[requestID] = pbtExitedMetricValue
+			s.Metrics[requestID] = pbtExitedMetricValue
 		}
 	}
 
@@ -212,10 +215,10 @@ func (s *pbtSearch) exploreParams(ctx context, old hparamSample) hparamSample {
 }
 
 func (s *pbtSearch) checkpointCompleted(
-	ctx context, requestID RequestID, checkpoint Checkpoint, metrics workload.CheckpointMetrics,
+	ctx context, requestID model.RequestID, checkpoint Checkpoint, metrics workload.CheckpointMetrics,
 ) ([]Operation, error) {
-	ops := s.waitingOps[checkpoint]
-	delete(s.waitingOps, checkpoint)
+	ops := s.WaitingOps[checkpoint]
+	delete(s.WaitingOps, checkpoint)
 	return ops, nil
 }
 
@@ -225,9 +228,9 @@ func (s *pbtSearch) progress(unitsCompleted float64) float64 {
 }
 
 func (s *pbtSearch) trialExitedEarly(
-	ctx context, requestID RequestID, exitedReason workload.ExitedReason,
+	ctx context, requestID model.RequestID, exitedReason workload.ExitedReason,
 ) ([]Operation, error) {
-	s.earlyExitTrials[requestID] = true
-	s.metrics[requestID] = pbtExitedMetricValue
+	s.EarlyExitTrials[requestID] = true
+	s.Metrics[requestID] = pbtExitedMetricValue
 	return s.runNewTrials(ctx, requestID)
 }

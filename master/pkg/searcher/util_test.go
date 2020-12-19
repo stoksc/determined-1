@@ -225,8 +225,8 @@ func checkValueSimulation(
 	var nextTrialID int
 	var pending []Operation
 
-	trialIDs := map[RequestID]int{}
-	trialOpIdx := map[RequestID]int{}
+	trialIDs := map[model.RequestID]int{}
+	trialOpIdx := map[model.RequestID]int{}
 
 	ctx := context{
 		rand:    nprand.New(0),
@@ -242,7 +242,7 @@ func checkValueSimulation(
 
 	for len(pending) > 0 {
 		var exitEarly bool
-		var requestID RequestID
+		var requestID model.RequestID
 		operation := pending[0]
 		pending = pending[1:]
 

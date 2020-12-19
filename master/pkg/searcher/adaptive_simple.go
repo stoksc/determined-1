@@ -64,8 +64,8 @@ func newSyncHalvingSimpleSearch(config model.SyncHalvingConfig, trials int) Sear
 	return &syncHalvingSearch{
 		SyncHalvingConfig: config,
 		rungs:             rungs,
-		trialRungs:        make(map[RequestID]int),
-		earlyExitTrials:   make(map[RequestID]bool),
+		trialRungs:        make(map[model.RequestID]int),
+		earlyExitTrials:   make(map[model.RequestID]bool),
 		expectedUnits:     model.NewLength(config.Unit(), expectedUnits),
 	}
 }

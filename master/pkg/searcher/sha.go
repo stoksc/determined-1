@@ -18,9 +18,9 @@ type syncHalvingSearch struct {
 	model.SyncHalvingConfig
 
 	rungs      []*rung
-	trialRungs map[RequestID]int
+	trialRungs map[model.RequestID]int
 	// earlyExitTrials contains trials that exited early that are still considered in the search.
-	earlyExitTrials map[RequestID]bool
+	earlyExitTrials map[model.RequestID]bool
 	trialsCompleted int
 
 	expectedUnits model.Length
@@ -73,14 +73,14 @@ func newSyncHalvingSearch(config model.SyncHalvingConfig) SearchMethod {
 	return &syncHalvingSearch{
 		SyncHalvingConfig: config,
 		rungs:             rungs,
-		trialRungs:        make(map[RequestID]int),
-		earlyExitTrials:   make(map[RequestID]bool),
+		trialRungs:        make(map[model.RequestID]int),
+		earlyExitTrials:   make(map[model.RequestID]bool),
 		expectedUnits:     model.NewLength(config.Unit(), expectedUnits),
 	}
 }
 
 type trialMetric struct {
-	requestID RequestID
+	requestID model.RequestID
 	metric    float64
 	// fields below used by asha.go.
 	promoted bool
@@ -98,7 +98,7 @@ type rung struct {
 
 // promotions handles bookkeeping of validation metrics and returns a RequestID to promote if
 // appropriate.
-func (r *rung) promotionsSync(requestID RequestID, metric float64) []RequestID {
+func (r *rung) promotionsSync(requestID model.RequestID, metric float64) []model.RequestID {
 	// Insert the new trial result in the appropriate place in the sorted list.
 	insertIndex := sort.Search(
 		len(r.metrics),
@@ -117,10 +117,10 @@ func (r *rung) promotionsSync(requestID RequestID, metric float64) []RequestID {
 	case currPromote <= 0: // Not enough trials completed for any promotions.
 		return nil
 	case insertIndex < currPromote: // Incoming trial should be promoted.
-		return []RequestID{requestID}
+		return []model.RequestID{requestID}
 	default: // Promote next trial in sorted metrics array.
 		t := &r.metrics[currPromote-1]
-		return []RequestID{t.requestID}
+		return []model.RequestID{t.requestID}
 	}
 }
 
@@ -137,7 +137,7 @@ func (s *syncHalvingSearch) initialOperations(ctx context) ([]Operation, error) 
 }
 
 func (s *syncHalvingSearch) validationCompleted(
-	ctx context, requestID RequestID, validate Validate, metrics workload.ValidationMetrics,
+	ctx context, requestID model.RequestID, validate Validate, metrics workload.ValidationMetrics,
 ) ([]Operation, error) {
 	// Extract the relevant metric as a float.
 	metric, err := metrics.Metric(s.Metric)
@@ -152,7 +152,7 @@ func (s *syncHalvingSearch) validationCompleted(
 }
 
 func (s *syncHalvingSearch) promoteSync(
-	ctx context, requestID RequestID, metric float64,
+	ctx context, requestID model.RequestID, metric float64,
 ) ([]Operation, error) {
 	rungIndex := s.trialRungs[requestID]
 	rung := s.rungs[rungIndex]
@@ -206,7 +206,7 @@ func (s *syncHalvingSearch) progress(unitsCompleted float64) float64 {
 }
 
 func (s *syncHalvingSearch) trialExitedEarly(
-	ctx context, requestID RequestID, exitedReason workload.ExitedReason,
+	ctx context, requestID model.RequestID, exitedReason workload.ExitedReason,
 ) ([]Operation, error) {
 	s.earlyExitTrials[requestID] = true
 	return s.promoteSync(ctx, requestID, shaExitedMetricValue)

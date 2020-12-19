@@ -1164,8 +1164,8 @@ func (db *PgDB) AddTrial(trial *model.Trial) error {
 	// Assume the foreign key constraint is handled by the database.
 	err := db.namedGet(&trial.ID, `
 INSERT INTO trials
-(experiment_id, state, start_time, end_time, hparams, warm_start_checkpoint_id, seed)
-VALUES (:experiment_id, :state, :start_time, :end_time, :hparams, :warm_start_checkpoint_id, :seed)
+(request_id, experiment_id, state, start_time, end_time, hparams, warm_start_checkpoint_id, seed)
+VALUES (:request_id, :experiment_id, :state, :start_time, :end_time, :hparams, :warm_start_checkpoint_id, :seed)
 RETURNING id`, trial)
 	if err != nil {
 		return errors.Wrapf(err, "error inserting trial %v", *trial)
@@ -1181,6 +1181,18 @@ SELECT id, experiment_id, state, start_time, end_time, hparams, warm_start_check
 FROM trials
 WHERE id = $1`, &trial, id); err != nil {
 		return nil, errors.Wrapf(err, "error querying for trial %v", id)
+	}
+	return &trial, nil
+}
+
+// TrialByRequestID looks up a trial by RequestID, returning an error if none exists.
+func (db *PgDB) TrialByRequestID(requestID model.RequestID) (*model.Trial, error) {
+	trial := model.Trial{}
+	if err := db.query(`
+SELECT id, experiment_id, state, start_time, end_time, hparams, warm_start_checkpoint_id, seed
+FROM trials
+WHERE request_id = $1`, &trial, requestID); err != nil {
+		return nil, errors.Wrapf(err, "error querying for trial %v", requestID)
 	}
 	return &trial, nil
 }
@@ -1213,31 +1225,6 @@ WHERE id = :id`, setClause(toUpdate)), trial)
 	if err != nil {
 		return errors.Wrapf(err, "error updating (%v) in trial %v",
 			strings.Join(toUpdate, ", "), id)
-	}
-	return nil
-}
-
-// RollbackSearcherEvents rolls back the events for an experiment to the last step with a
-// checkpoint. This is (and should only be) called by master restart to roll searcher events back
-// to the last checkpoint for each trial in the given experiment.
-func (db *PgDB) RollbackSearcherEvents(experimentID int) error {
-	_, err := db.sql.Exec(`
-DELETE FROM searcher_events se
-USING (
-    SELECT
-        (se.content->'msg'->'workload'->>'trial_id')::int trial_id,
-        max(CASE WHEN content->'msg'->'workload'->>'kind' = 'CHECKPOINT_MODEL'
-        THEN (se.content->'msg'->'workload'->>'step_id')::int ELSE 0 END) step_id
-    FROM searcher_events se
-    GROUP BY trial_id
-	) latest_checkpoint
-WHERE experiment_id = $1
-    AND (se.content->'msg'->'workload'->>'trial_id')::int = latest_checkpoint.trial_id
-    AND (se.content->'msg'->'workload'->>'step_id')::int > latest_checkpoint.step_id
-    AND (se.content->'msg'->'workload'->>'step_id')::int != 0;
-	`, experimentID)
-	if err != nil {
-		return errors.Wrapf(err, "error rolling back events for experiment %d", experimentID)
 	}
 	return nil
 }

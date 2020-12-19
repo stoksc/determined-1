@@ -327,7 +327,7 @@ func TestTrialWorkloadSequencerFailedWorkloads(t *testing.T) {
 	}, nil)
 	assert.NilError(t, err)
 	assert.Equal(t, op, nil, "should not have finished %v yet", op)
-	assert.Equal(t, s.exitingEarly, true, "should have been exiting early")
+	assert.Equal(t, s.ExitingEarly, true, "should have been exiting early")
 }
 
 func TestTrialWorkloadSequencerOperationLessThanBatchSize(t *testing.T) {
