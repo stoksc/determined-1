@@ -18,10 +18,9 @@ type (
 		Rungs      []*rung
 		TrialRungs map[model.RequestID]int
 		// EarlyExitTrials contains trials that exited early that are still considered in the search.
-		EarlyExitTrials  map[model.RequestID]bool
-		ClosedTrials     map[model.RequestID]bool
-		CurrentMaxTrials int
-		TrialsCompleted  int
+		EarlyExitTrials map[model.RequestID]bool
+		ClosedTrials    map[model.RequestID]bool
+		TrialsCompleted int
 	}
 
 	asyncHalvingSearch struct {
@@ -50,20 +49,19 @@ func newAsyncHalvingSearch(config model.AsyncHalvingConfig) SearchMethod {
 	return &asyncHalvingSearch{
 		AsyncHalvingConfig: config,
 		asyncHalvingSearchState: asyncHalvingSearchState{
-			Rungs:            rungs,
-			TrialRungs:       make(map[model.RequestID]int),
-			EarlyExitTrials:  make(map[model.RequestID]bool),
-			ClosedTrials:     make(map[model.RequestID]bool),
-			CurrentMaxTrials: config.MaxTrials,
+			Rungs:           rungs,
+			TrialRungs:      make(map[model.RequestID]int),
+			EarlyExitTrials: make(map[model.RequestID]bool),
+			ClosedTrials:    make(map[model.RequestID]bool),
 		},
 	}
 }
 
-func (s *asyncHalvingSearch) save() ([]byte, error) {
+func (s *asyncHalvingSearch) save() (json.RawMessage, error) {
 	return json.Marshal(s.asyncHalvingSearchState)
 }
 
-func (s *asyncHalvingSearch) load(state []byte) error {
+func (s *asyncHalvingSearch) load(state json.RawMessage) error {
 	if state == nil {
 		return nil
 	}
@@ -121,10 +119,10 @@ func (s *asyncHalvingSearch) initialOperations(ctx context) ([]Operation, error)
 	var maxConcurrentTrials int
 
 	if s.MaxConcurrentTrials > 0 {
-		maxConcurrentTrials = min(s.MaxConcurrentTrials, s.CurrentMaxTrials)
+		maxConcurrentTrials = min(s.MaxConcurrentTrials, s.MaxTrials)
 	} else {
 		maxConcurrentTrials = max(
-			min(int(math.Pow(s.Divisor, float64(s.NumRungs-1))), s.CurrentMaxTrials),
+			min(int(math.Pow(s.Divisor, float64(s.NumRungs-1))), s.MaxTrials),
 			1)
 	}
 
@@ -215,7 +213,7 @@ func (s *asyncHalvingSearch) promoteAsync(
 	}
 
 	allTrials := len(s.TrialRungs)
-	if !addedTrainWorkload && allTrials < s.CurrentMaxTrials {
+	if !addedTrainWorkload && allTrials < s.MaxTrials {
 		create := NewCreate(
 			ctx.rand, sampleAll(ctx.hparams, ctx.rand), model.TrialWorkloadSequencerType)
 		s.TrialRungs[create.RequestID] = 0
@@ -225,7 +223,7 @@ func (s *asyncHalvingSearch) promoteAsync(
 	}
 
 	// Only close out trials once we have reached the MaxTrials for the searcher.
-	if len(s.Rungs[0].metrics) == s.CurrentMaxTrials {
+	if len(s.Rungs[0].metrics) == s.MaxTrials {
 		ops = append(ops, s.closeOutRungs()...)
 	}
 	return ops
@@ -254,9 +252,9 @@ func (s *asyncHalvingSearch) closeOutRungs() []Operation {
 func (s *asyncHalvingSearch) progress(float64) float64 {
 	allTrials := len(s.Rungs[0].metrics)
 	// Give ourselves an overhead of 20% of MaxTrials when calculating progress.
-	progress := float64(allTrials) / (1.2 * float64(s.CurrentMaxTrials))
-	if allTrials == s.CurrentMaxTrials {
-		progress = math.Max(float64(s.TrialsCompleted)/float64(s.CurrentMaxTrials), progress)
+	progress := float64(allTrials) / (1.2 * float64(s.MaxTrials))
+	if allTrials == s.MaxTrials {
+		progress = math.Max(float64(s.TrialsCompleted)/float64(s.MaxTrials), progress)
 	}
 	return progress
 }

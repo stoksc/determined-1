@@ -7,9 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/apex/log"
-
 	"github.com/determined-ai/determined/master/pkg/workload"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -165,7 +164,7 @@ type terminatedContainerWithState struct {
 type (
 	// trialState keeps all the state of the trial that we persist between failures
 	trialState struct {
-		TrialWorkloadSequencerState []byte
+		TrialWorkloadSequencerState json.RawMessage
 
 		// restarts is essentially a failure count, it increments when the trial fails and we retry it.
 		Restarts int
@@ -1182,7 +1181,7 @@ func (t *trial) terminated(ctx *actor.Context) {
 	}
 }
 
-func (t *trial) save() ([]byte, error) {
+func (t *trial) save() (json.RawMessage, error) {
 	sequencerSnapshot, err := t.sequencer.save()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to snapshot trial workload sequencer")
@@ -1193,7 +1192,7 @@ func (t *trial) save() ([]byte, error) {
 	return trialSnapshot, errors.Wrap(err, "failed to snapshot trial")
 }
 
-func (t *trial) load(snapshot []byte) error {
+func (t *trial) load(snapshot json.RawMessage) error {
 	if err := json.Unmarshal(snapshot, &t.trialState); err != nil {
 		return errors.Wrap(err, "failed to unmarshal trial snapshot")
 	}

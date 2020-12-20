@@ -4,7 +4,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	model2 "github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/model"
 )
 
 // CheckSearcherSnapshotExists checks if there is a searcher snapshot associated with
@@ -51,7 +51,7 @@ LIMIT 1`, experimentID); errors.Cause(err) == ErrNotFound {
 }
 
 // TrialSnapshot returns the snapshot for the specified trial.
-func (db *PgDB) TrialSnapshot(requestID model2.RequestID) ([]byte, error) {
+func (db *PgDB) TrialSnapshot(requestID model.RequestID) ([]byte, error) {
 	if b, err := db.rawQuery(`
 SELECT content
 FROM trial_snapshots
@@ -66,7 +66,7 @@ LIMIT 1`, requestID); err != nil {
 
 // SaveSnapshot saves a searcher and trial snapshot together.
 func (db *PgDB) SaveSnapshot(
-	experimentID int, trialID int, requestID model2.RequestID, searcher []byte, trial []byte,
+	experimentID int, trialID int, requestID model.RequestID, searcher []byte, trial []byte,
 ) error {
 	tx, err := db.sql.Begin()
 	if err != nil {

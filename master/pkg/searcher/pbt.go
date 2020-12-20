@@ -48,11 +48,11 @@ func newPBTSearch(config model.PBTConfig) SearchMethod {
 	}
 }
 
-func (s *pbtSearch) save() ([]byte, error) {
+func (s *pbtSearch) save() (json.RawMessage, error) {
 	return json.Marshal(s.pbtSearchState)
 }
 
-func (s *pbtSearch) load(state []byte) error {
+func (s *pbtSearch) load(state json.RawMessage) error {
 	if state == nil {
 		return nil
 	}

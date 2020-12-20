@@ -55,7 +55,7 @@ type (
 
 type (
 	experimentState struct {
-		SearcherState  []byte
+		SearcherState  json.RawMessage
 		BestValidation *float64
 	}
 
@@ -175,7 +175,6 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 			Priority: e.Config.Resources.Priority,
 			Handler:  ctx.Self(),
 		})
-
 		ops, err := e.searcher.InitialOperations()
 		e.processOperations(ctx, ops, err)
 	case trialCreated:
@@ -202,7 +201,7 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 		if b, err := e.save(); err != nil {
 			return err
 		} else if requestID, ok := e.searcher.RequestIDs[msg.trialID]; !ok {
-			return err // Impossible error
+			return err
 		} else if err := e.db.SaveSnapshot(e.ID, msg.trialID, requestID, b, msg.snapshot); err != nil {
 			return err
 		}
@@ -212,14 +211,14 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 		ctx.Tell(ctx.Sender(), msg)
 	case actor.ChildFailed:
 		ctx.Log().WithError(msg.Error).Error("trial failed unexpectedly")
-		requestID := model.MustParse(msg.Child.Address().Local())
+		requestID := model.MustParseRequestID(msg.Child.Address().Local())
 		ops, err := e.searcher.TrialClosed(requestID)
 		e.processOperations(ctx, ops, err)
 		if e.canTerminate(ctx) {
 			ctx.Self().Stop()
 		}
 	case actor.ChildStopped:
-		requestID := model.MustParse(msg.Child.Address().Local())
+		requestID := model.MustParseRequestID(msg.Child.Address().Local())
 		ops, err := e.searcher.TrialClosed(requestID)
 		e.processOperations(ctx, ops, err)
 		if e.canTerminate(ctx) {
@@ -468,7 +467,7 @@ func (e *experiment) canTerminate(ctx *actor.Context) bool {
 	return model.StoppingStates[e.State] && len(ctx.Children()) == 0
 }
 
-func (e *experiment) save() ([]byte, error) {
+func (e *experiment) save() (json.RawMessage, error) {
 	searcherSnapshot, err := e.searcher.Save()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to snapshot searcher")
@@ -479,7 +478,7 @@ func (e *experiment) save() ([]byte, error) {
 	return experimentSnapshot, errors.Wrap(err, "failed to snapshot experiment")
 }
 
-func (e *experiment) load(experimentSnapshot []byte) error {
+func (e *experiment) load(experimentSnapshot json.RawMessage) error {
 	if err := json.Unmarshal(experimentSnapshot, &e.experimentState); err != nil {
 		return errors.Wrap(err, "failed to unmarshal experiment snapshot")
 	}

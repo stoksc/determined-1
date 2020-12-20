@@ -1,6 +1,8 @@
 package searcher
 
 import (
+	"encoding/json"
+
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/nprand"
 	"github.com/determined-ai/determined/master/pkg/workload"
@@ -48,9 +50,9 @@ type SearchMethod interface {
 	) ([]Operation, error)
 	// NOTE: searcher has to handle deser because only it knows appropriate types.
 	// save returns the search method's current state.
-	save() ([]byte, error)
+	save() (json.RawMessage, error)
 	// load restores the search method from a previous state.
-	load([]byte) error
+	load(json.RawMessage) error
 	// SearchMethod embeds the InUnits interface because it is in terms of a specific unit.
 	model.InUnits
 }
@@ -110,11 +112,11 @@ func (defaultSearchMethod) trialExitedEarly( //nolint: unused
 }
 
 // save is the default implementation, used by stateless searchers like random and grid.
-func (defaultSearchMethod) save() ([]byte, error) {
+func (defaultSearchMethod) save() (json.RawMessage, error) {
 	return nil, nil
 }
 
 // load is the default implementation, used by stateless searchers like random and grid.
-func (defaultSearchMethod) load([]byte) error {
+func (defaultSearchMethod) load(json.RawMessage) error {
 	return nil
 }

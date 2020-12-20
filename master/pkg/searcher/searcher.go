@@ -24,7 +24,7 @@ type (
 		TotalUnitsCompleted float64
 		Shutdown            bool
 
-		SearchMethodState []byte
+		SearchMethodState json.RawMessage
 	}
 
 	// Searcher encompasses the state as the searcher progresses using the provided search method.
@@ -194,7 +194,7 @@ func (s *Searcher) Record(ops []Operation) {
 }
 
 // Save returns a searchers current state.
-func (s *Searcher) Save() ([]byte, error) {
+func (s *Searcher) Save() (json.RawMessage, error) {
 	b, err := s.method.save()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to save search method")
@@ -204,7 +204,7 @@ func (s *Searcher) Save() ([]byte, error) {
 }
 
 // Load loads a searcher from prior state.
-func (s *Searcher) Load(state []byte, exp model.Experiment) error {
+func (s *Searcher) Load(state json.RawMessage, exp model.Experiment) error {
 	s.rand.Seed(exp.Config.Reproducibility.ExperimentSeed)
 	s.hparams = exp.Config.Hyperparameters
 	if state == nil {

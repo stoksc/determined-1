@@ -54,8 +54,8 @@ func (r RequestID) String() string {
 	return uuid.UUID(r).String()
 }
 
-// Parse decodes s into a request id or returns an error.
-func Parse(s string) (RequestID, error) {
+// ParseRequestID decodes s into a request id or returns an error.
+func ParseRequestID(s string) (RequestID, error) {
 	parsed, err := uuid.Parse(s)
 	if err != nil {
 		return RequestID{}, err
@@ -63,9 +63,9 @@ func Parse(s string) (RequestID, error) {
 	return RequestID(parsed), nil
 }
 
-// MustParse decodes s into a request id or panics.
-func MustParse(s string) RequestID {
-	parsed, err := Parse(s)
+// MustParseRequestID decodes s into a request id or panics.
+func MustParseRequestID(s string) RequestID {
+	parsed, err := ParseRequestID(s)
 	if err != nil {
 		panic(err)
 	}

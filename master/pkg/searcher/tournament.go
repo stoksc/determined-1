@@ -15,7 +15,7 @@ type (
 	tournamentSearchState struct {
 		subSearchUnitsCompleted map[SearchMethod]float64
 		trialTable              map[model.RequestID]SearchMethod
-		subSearchStates         [][]byte
+		subSearchStates         []json.RawMessage
 	}
 	tournamentSearch struct {
 		subSearches []SearchMethod
@@ -29,12 +29,12 @@ func newTournamentSearch(subSearches ...SearchMethod) *tournamentSearch {
 		tournamentSearchState: tournamentSearchState{
 			subSearchUnitsCompleted: make(map[SearchMethod]float64),
 			trialTable:              make(map[model.RequestID]SearchMethod),
-			subSearchStates:         make([][]byte, len(subSearches)),
+			subSearchStates:         make([]json.RawMessage, len(subSearches)),
 		},
 	}
 }
 
-func (s *tournamentSearch) save() ([]byte, error) {
+func (s *tournamentSearch) save() (json.RawMessage, error) {
 	for i := range s.subSearches {
 		b, err := s.subSearches[i].save()
 		if err != nil {
@@ -45,7 +45,7 @@ func (s *tournamentSearch) save() ([]byte, error) {
 	return json.Marshal(s.tournamentSearchState)
 }
 
-func (s *tournamentSearch) load(state []byte) error {
+func (s *tournamentSearch) load(state json.RawMessage) error {
 	if state == nil {
 		return nil
 	}

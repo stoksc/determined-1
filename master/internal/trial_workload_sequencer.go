@@ -98,11 +98,11 @@ func newTrialWorkloadSequencer(
 	}
 }
 
-func (s *trialWorkloadSequencer) save() ([]byte, error) {
+func (s *trialWorkloadSequencer) save() (json.RawMessage, error) {
 	return json.Marshal(s.trialWorkloadSequencerState)
 }
 
-func (s *trialWorkloadSequencer) load(state []byte) error {
+func (s *trialWorkloadSequencer) load(state json.RawMessage) error {
 	return json.Unmarshal(state, &s.trialWorkloadSequencerState)
 }
 
