@@ -332,8 +332,10 @@ func (t *trial) Receive(ctx *actor.Context) error {
 			label := t.experiment.Config.Resources.AgentLabel
 			resourcePool := t.experiment.Config.Resources.ResourcePool
 			var name string
+			meta := map[string]interface{}{"experiment_id": t.experiment.ID}
 			if t.idSet {
 				name = fmt.Sprintf("Trial %d (Experiment %d)", t.id, t.experiment.ID)
+				meta["trial_id"] = t.id
 			} else {
 				name = fmt.Sprintf("Trial (Experiment %d)", t.experiment.ID)
 			}
@@ -341,6 +343,7 @@ func (t *trial) Receive(ctx *actor.Context) error {
 			t.task = &sproto.AllocateRequest{
 				ID:             sproto.NewTaskID(),
 				Name:           name,
+				Meta:           meta,
 				Group:          ctx.Self().Parent(),
 				SlotsNeeded:    slotsNeeded,
 				NonPreemptible: false,
@@ -560,6 +563,10 @@ func (t *trial) processAllocated(
 		}
 		ctx.Tell(t.rm, sproto.SetTaskName{
 			Name:        fmt.Sprintf("Trial %d (Experiment %d)", t.id, t.experiment.ID),
+			Meta: map[string]interface{}{
+				"experiment_id": t.experiment.ID,
+				"trial_id":      t.id,
+			},
 			TaskHandler: ctx.Self(),
 		})
 		// We snapshot here to shorten the window where a trial can exist without the

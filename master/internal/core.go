@@ -19,7 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/determined-ai/determined/master/internal/prom"
 
 	"github.com/determined-ai/determined/master/internal/elastic"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -794,6 +797,12 @@ func (m *Master) Run(ctx context.Context) error {
 	m.echo.Any("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(pprof.Profile)))
 	m.echo.Any("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(pprof.Symbol)))
 	m.echo.Any("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(pprof.Trace)))
+
+	if m.config.EnablePrometheus {
+		m.echo.Any("/debug/prom/det-state-metrics", echo.WrapHandler(promhttp.Handler()))
+		// TODO: support separate configs for separate jobs (one for high freq monitoring, one for low).
+		m.echo.GET("/debug/prom/file_sd_configs", prom.GetFileSDConfig(m.system))
+	}
 
 	handler := m.system.AskAt(actor.Addr("proxy"), proxy.NewProxyHandler{ServiceID: "service"})
 	m.echo.Any("/proxy/:service/*", handler.Get().(echo.HandlerFunc))

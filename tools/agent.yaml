@@ -1,2 +1,4 @@
 master_host: localhost
 master_port: 8080
+api_enabled: true
+bind_port: 9102

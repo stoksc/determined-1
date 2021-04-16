@@ -3,6 +3,9 @@ package agent
 import (
 	"net/http"
 
+	"github.com/determined-ai/determined/master/pkg/container"
+	"github.com/determined-ai/determined/master/pkg/model"
+
 	"github.com/labstack/echo"
 	"github.com/pkg/errors"
 
@@ -28,8 +31,6 @@ type agents struct {
 	opts *aproto.MasterSetAgentOptions
 }
 
-type agentsSummary map[string]AgentSummary
-
 func (a *agents) Receive(ctx *actor.Context) error {
 	switch msg := ctx.Message().(type) {
 	case api.WebSocketConnected:
@@ -39,6 +40,8 @@ func (a *agents) Receive(ctx *actor.Context) error {
 		} else {
 			ctx.Respond(ctx.Ask(ref, msg).Get())
 		}
+	case model.AgentsSummary:
+		ctx.Respond(a.summarize(ctx))
 	case *apiv1.GetAgentsRequest:
 		response := &apiv1.GetAgentsResponse{}
 		for _, a := range a.summarize(ctx) {
@@ -68,9 +71,11 @@ func (a *agents) createAgentActor(
 		return nil, errors.Wrapf(err, "cannot find specified resource pool for agent %s", id)
 	}
 	ref, ok := ctx.ActorOf(id, &agent{
-		resourcePool:     sproto.GetRP(ctx.Self().System(), resourcePool),
-		resourcePoolName: resourcePool,
-		opts:             opts,
+		containerRuntimeIDs: map[container.ID]string{},
+		containerMeta:       map[container.ID]map[string]interface{}{},
+		resourcePool:        sproto.GetRP(ctx.Self().System(), resourcePool),
+		resourcePoolName:    resourcePool,
+		opts:                opts,
 	})
 	if !ok {
 		return nil, errors.Errorf("agent already connected: %s", id)
@@ -87,11 +92,11 @@ func (a *agents) handleAPIRequest(ctx *actor.Context, apiCtx echo.Context) {
 	}
 }
 
-func (a *agents) summarize(ctx *actor.Context) agentsSummary {
-	results := ctx.AskAll(AgentSummary{}, ctx.Children()...).GetAll()
-	summary := make(map[string]AgentSummary, len(results))
+func (a *agents) summarize(ctx *actor.Context) model.AgentsSummary {
+	results := ctx.AskAll(model.AgentSummary{}, ctx.Children()...).GetAll()
+	summary := make(map[string]model.AgentSummary, len(results))
 	for ref, result := range results {
-		summary[ref.Address().String()] = result.(AgentSummary)
+		summary[ref.Address().String()] = result.(model.AgentSummary)
 	}
 	return summary
 }

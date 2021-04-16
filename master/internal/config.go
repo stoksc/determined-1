@@ -93,6 +93,7 @@ type Config struct {
 	ClusterName           string                            `json:"cluster_name"`
 	Logging               model.LoggingConfig               `json:"logging"`
 	HPImportance          hpimportance.HPImportanceConfig   `json:"hyperparameter_importance"`
+	EnablePrometheus      bool                              `json:"enable_prometheus"`
 
 	*resourcemanagers.ResourceConfig
 }

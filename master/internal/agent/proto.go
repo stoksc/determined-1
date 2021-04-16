@@ -1,12 +1,13 @@
 package agent
 
 import (
+	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
 	proto "github.com/determined-ai/determined/proto/pkg/agentv1"
 )
 
 // ToProtoAgent converts an agent summary to a proto struct.
-func ToProtoAgent(a AgentSummary) *proto.Agent {
+func ToProtoAgent(a model.AgentSummary) *proto.Agent {
 	slots := make(map[string]*proto.Slot)
 	for _, s := range a.Slots {
 		slots[s.ID] = toProtoSlot(s)
@@ -21,7 +22,7 @@ func ToProtoAgent(a AgentSummary) *proto.Agent {
 	}
 }
 
-func toProtoSlot(s SlotSummary) *proto.Slot {
+func toProtoSlot(s model.SlotSummary) *proto.Slot {
 	return &proto.Slot{
 		Id:        s.ID,
 		Device:    s.Device.Proto(),

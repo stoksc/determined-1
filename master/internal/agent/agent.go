@@ -5,11 +5,13 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo"
 	"github.com/pkg/errors"
+
+	"github.com/determined-ai/determined/master/internal/prom"
+	"github.com/determined-ai/determined/master/pkg/model"
 
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/telemetry"
@@ -23,11 +25,14 @@ import (
 )
 
 type agent struct {
-	address          string
-	resourcePool     *actor.Ref
-	socket           *actor.Ref
-	slots            *actor.Ref
-	containers       map[container.ID]*actor.Ref
+	address             string
+	resourcePool        *actor.Ref
+	socket              *actor.Ref
+	slots               *actor.Ref
+	containers          map[container.ID]*actor.Ref
+	containerRuntimeIDs map[container.ID]string
+	// TODO: use a context.Context, not map string int
+	containerMeta    map[container.ID]map[string]interface{}
 	resourcePoolName string
 	label            string
 
@@ -40,23 +45,13 @@ type agent struct {
 	opts *aproto.MasterSetAgentOptions
 }
 
-// AgentSummary summarizes the state on an agent.
-type AgentSummary struct {
-	ID             string       `json:"id"`
-	RegisteredTime time.Time    `json:"registered_time"`
-	Slots          SlotsSummary `json:"slots"`
-	NumContainers  int          `json:"num_containers"`
-	ResourcePool   string       `json:"resource_pool"`
-	Label          string       `json:"label"`
-}
-
 func (a *agent) Receive(ctx *actor.Context) error {
 	switch msg := ctx.Message().(type) {
 	case actor.PreStart:
 		a.uuid = uuid.New()
 		a.slots, _ = ctx.ActorOf("slots", &slots{resourcePool: a.resourcePool})
 		a.containers = make(map[container.ID]*actor.Ref)
-	case AgentSummary:
+	case model.AgentSummary:
 		ctx.Respond(a.summarize(ctx))
 	case ws.WebSocketConnected:
 		check.Panic(check.True(a.socket == nil, "websocket already connected"))
@@ -88,6 +83,7 @@ func (a *agent) Receive(ctx *actor.Context) error {
 		}})
 		ctx.Tell(a.slots, msg.StartContainer)
 		a.containers[msg.Container.ID] = msg.TaskActor
+		a.containerMeta[msg.Container.ID] = msg.Meta
 	case aproto.MasterMessage:
 		a.handleIncomingWSMessage(ctx, msg)
 	case *proto.GetAgentRequest:
@@ -181,11 +177,20 @@ func (a *agent) containerStateChanged(ctx *actor.Context, sc aproto.ContainerSta
 		rsc.ContainerStarted = &sproto.TaskContainerStarted{
 			Addresses: sc.ContainerStarted.Addresses(),
 		}
+		a.containerRuntimeIDs[sc.Container.ID] = sc.ContainerStarted.ContainerInfo.ID
+		if trialID, ok := a.containerMeta[sc.Container.ID]["trial_id"]; ok {
+			prom.TrialContainerStarted(trialID.(int), a.containerRuntimeIDs[sc.Container.ID], sc.Container)
+		}
 	case container.Terminated:
 		ctx.Log().Infof("stopped container id: %s", sc.Container.ID)
 		delete(a.containers, sc.Container.ID)
 		rsc.ContainerStopped = &sproto.TaskContainerStopped{
 			ContainerStopped: *sc.ContainerStopped,
+		}
+		if trialID, ok := a.containerMeta[sc.Container.ID]["trial_id"]; ok {
+			prom.TrialContainerStopped(trialID.(int), a.containerRuntimeIDs[sc.Container.ID], sc.Container)
+			delete(a.containerRuntimeIDs, sc.Container.ID)
+			delete(a.containerMeta, sc.Container.ID)
 		}
 	}
 
@@ -193,13 +198,14 @@ func (a *agent) containerStateChanged(ctx *actor.Context, sc aproto.ContainerSta
 	ctx.Tell(a.slots, sc)
 }
 
-func (a *agent) summarize(ctx *actor.Context) AgentSummary {
-	return AgentSummary{
+func (a *agent) summarize(ctx *actor.Context) model.AgentSummary {
+	return model.AgentSummary{
 		ID:             ctx.Self().Address().Local(),
 		RegisteredTime: ctx.Self().RegisteredTime(),
-		Slots:          ctx.Ask(a.slots, SlotsSummary{}).Get().(SlotsSummary),
+		Slots:          ctx.Ask(a.slots, model.SlotsSummary{}).Get().(model.SlotsSummary),
 		NumContainers:  len(a.containers),
 		ResourcePool:   a.resourcePoolName,
 		Label:          a.label,
+		RemoteAddr:     a.address,
 	}
 }

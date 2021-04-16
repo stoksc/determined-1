@@ -3,6 +3,8 @@ package agent
 import (
 	"net/http"
 
+	"github.com/determined-ai/determined/master/pkg/model"
+
 	"github.com/labstack/echo"
 	"github.com/pkg/errors"
 
@@ -17,12 +19,9 @@ type slots struct {
 	resourcePool *actor.Ref
 }
 
-// SlotsSummary contains a summary for a number of slots.
-type SlotsSummary map[string]SlotSummary
-
 func (s *slots) Receive(ctx *actor.Context) error {
 	switch msg := ctx.Message().(type) {
-	case SlotsSummary:
+	case model.SlotsSummary:
 		ctx.Respond(s.summarize(ctx))
 	case aproto.AgentStarted:
 		for _, d := range msg.Devices {
@@ -69,11 +68,11 @@ func (s *slots) handleAPIRequest(ctx *actor.Context, apiCtx echo.Context) {
 	}
 }
 
-func (s *slots) summarize(ctx *actor.Context) SlotsSummary {
-	results := ctx.AskAll(SlotSummary{}, ctx.Children()...).GetAll()
-	summary := make(map[string]SlotSummary, len(results))
+func (s *slots) summarize(ctx *actor.Context) model.SlotsSummary {
+	results := ctx.AskAll(model.SlotSummary{}, ctx.Children()...).GetAll()
+	summary := make(map[string]model.SlotSummary, len(results))
 	for ref, result := range results {
-		summary[ref.Address().String()] = result.(SlotSummary)
+		summary[ref.Address().String()] = result.(model.SlotSummary)
 	}
 	return summary
 }

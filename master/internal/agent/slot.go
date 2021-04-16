@@ -3,6 +3,8 @@ package agent
 import (
 	"net/http"
 
+	"github.com/determined-ai/determined/master/pkg/model"
+
 	"github.com/labstack/echo"
 	"github.com/pkg/errors"
 
@@ -33,25 +35,15 @@ func (s slotEnabled) Enabled() bool {
 	return s.agentEnabled && s.userEnabled
 }
 
-// SlotSummary summarizes the state of a slot.
-type SlotSummary struct {
-	ID        string               `json:"id"`
-	Device    device.Device        `json:"device"`
-	Enabled   bool                 `json:"enabled"`
-	Container *container.Container `json:"container"`
+type patchSlot struct {
+	Enabled bool `json:"enabled"`
 }
-
-type (
-	patchSlot struct {
-		Enabled bool `json:"enabled"`
-	}
-)
 
 func (s *slot) Receive(ctx *actor.Context) error {
 	switch msg := ctx.Message().(type) {
 	case actor.PreStart:
 		s.patch(ctx)
-	case SlotSummary:
+	case model.SlotSummary:
 		ctx.Respond(s.summarize(ctx))
 	case patchSlot:
 		s.enabled.userEnabled = msg.Enabled
@@ -127,8 +119,8 @@ func (s *slot) deviceID(ctx *actor.Context) sproto.DeviceID {
 	return sproto.DeviceID{Agent: ctx.Self().Parent().Parent(), Device: s.device}
 }
 
-func (s *slot) summarize(ctx *actor.Context) SlotSummary {
-	return SlotSummary{
+func (s *slot) summarize(ctx *actor.Context) model.SlotSummary {
+	return model.SlotSummary{
 		ID:        ctx.Self().Address().Local(),
 		Device:    s.device,
 		Enabled:   s.enabled.Enabled(),

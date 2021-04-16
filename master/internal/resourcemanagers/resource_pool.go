@@ -106,6 +106,7 @@ func (rp *ResourcePool) addTask(ctx *actor.Context, msg sproto.AllocateRequest) 
 func (rp *ResourcePool) receiveSetTaskName(ctx *actor.Context, msg sproto.SetTaskName) {
 	if task, found := rp.taskList.GetTaskByHandler(msg.TaskHandler); found {
 		task.Name = msg.Name
+		task.Meta = msg.Meta
 	}
 }
 
@@ -366,6 +367,7 @@ func (c containerAllocation) Start(ctx *actor.Context, spec image.TaskSpec) {
 	spec.Devices = c.devices
 	ctx.Tell(handler, sproto.StartTaskContainer{
 		TaskActor: c.req.TaskActor,
+		Meta:      c.req.Meta,
 		StartContainer: aproto.StartContainer{
 			Container: cproto.Container{
 				Parent:  c.req.TaskActor.Address(),

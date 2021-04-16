@@ -13,6 +13,7 @@ type (
 	AllocateRequest struct {
 		ID                  TaskID
 		Name                string
+		Meta                map[string]interface{}
 		Group               *actor.Ref
 		SlotsNeeded         int
 		NonPreemptible      bool
@@ -29,9 +30,10 @@ type (
 	GetTaskSummary struct{ ID *TaskID }
 	// GetTaskSummaries returns the summaries of all the tasks in the cluster.
 	GetTaskSummaries struct{}
-	// SetTaskName sets the name of the task.
+	// SetTaskName sets the name of the task and metadata associated with it.
 	SetTaskName struct {
 		Name        string
+		Meta        map[string]interface{}
 		TaskHandler *actor.Ref
 	}
 )

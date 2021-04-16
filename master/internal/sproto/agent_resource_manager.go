@@ -43,6 +43,7 @@ type (
 	// StartTaskContainer notifies the agent to start the task with the provided task spec.
 	StartTaskContainer struct {
 		TaskActor *actor.Ref
+		Meta      map[string]interface{}
 		aproto.StartContainer
 	}
 	// KillTaskContainer notifies the agent to kill a task container.
