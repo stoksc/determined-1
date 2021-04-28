@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/determined-ai/determined/proto/pkg/experimentv1"
+
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/determined-ai/determined/master/internal/protoutil"
@@ -538,18 +540,14 @@ func (a *apiServer) TrialPreemptionSignal(
 	req *apiv1.TrialPreemptionSignalRequest,
 	resp apiv1.Determined_TrialPreemptionSignalServer,
 ) error {
-	eID, rID, err := a.m.db.TrialExperimentAndRequestID(int(req.TrialId))
-	switch {
-	case err == db.ErrNotFound:
-		return trialNotFound
-	case err != nil:
+	trial, err := a.trialActorFromID(int(req.TrialId))
+	if err != nil {
 		return err
 	}
-	trialAddr := actor.Addr("experiments", eID, rID)
 
 	signal := make(chan struct{}, 1)
-	a.m.system.TellAt(trialAddr, trialWatchPreemption{signal: signal})
-	unwatch := func() { a.m.system.TellAt(trialAddr, trialUnwatchPreemption{signal: signal}) }
+	a.m.system.TellAt(trial, trialWatchPreemption{signal: signal})
+	unwatch := func() { a.m.system.TellAt(trial, trialUnwatchPreemption{signal: signal}) }
 
 	for {
 		select {
@@ -567,6 +565,123 @@ func (a *apiServer) TrialPreemptionSignal(
 			return nil
 		}
 	}
+}
+
+func (a *apiServer) GetTrialSearcherTrainUntil(
+	_ context.Context, req *apiv1.GetTrialSearcherTrainUntilRequest,
+) (*apiv1.GetTrialSearcherTrainUntilResponse, error) {
+	exp, err := a.experimentActorFromTrialID(int(req.TrialId))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := a.askDefaultSystem(exp, trialTrainUntilReq{
+		trialID: int(req.TrialId),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	switch tResp, ok := resp.(trialTrainUntilResp); {
+	case !ok:
+		return nil, unexpectedMessageError(exp, resp)
+	case tResp.finished:
+		return nil, nil
+	default:
+		return &apiv1.GetTrialSearcherTrainUntilResponse{
+			Length: &experimentv1.TrainingLength{
+				Units:  tResp.length.Unit.ToProto(),
+				Length: int32(tResp.length.Units),
+			},
+		}, nil
+	}
+}
+
+func (a *apiServer) ReportTrialSearcherValidation(
+	_ context.Context, req *apiv1.ReportTrialSearcherValidationRequest,
+) (*apiv1.ReportTrialSearcherValidationResponse, error) {
+	exp, err := a.experimentActorFromTrialID(int(req.TrialId))
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO(DET-5210): Sending a trial snapshot along forces an experiment snapshot,
+	// but with a nil snapshot it won't save the trial snapshot. At the end of push
+	// arch, we should just remove trial snapshots entirely (they should snapshotted
+	// but separately, not through/with experiments, since it's really just run id and restarts).
+	if _, err = a.askDefaultSystem(exp, trialReportValidation{
+		metric: req.SearcherMetric,
+		trialSnapshot: trialSnapshot{
+			trialID: int(req.TrialId),
+		},
+	}); err != nil {
+		return nil, err
+	}
+	return &apiv1.ReportTrialSearcherValidationResponse{}, nil
+}
+
+func (a *apiServer) ReportTrialProgress(
+	_ context.Context, req *apiv1.ReportTrialProgressRequest,
+) (*apiv1.ReportTrialProgressResponse, error) {
+	exp, err := a.experimentActorFromTrialID(int(req.TrialId))
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err = a.askDefaultSystem(exp, trialReportProgress{
+		progress: model.PartialUnits(req.Progress),
+	}); err != nil {
+		return nil, err
+	}
+	return &apiv1.ReportTrialProgressResponse{}, nil
+}
+
+func (a *apiServer) trialActorFromID(trialID int) (actor.Address, error) {
+	eID, rID, err := a.m.db.TrialExperimentAndRequestID(trialID)
+	switch {
+	case err == db.ErrNotFound:
+		return actor.Address{}, trialNotFound
+	case err != nil:
+		return actor.Address{}, err
+	}
+	return actor.Addr("experiments", eID, rID), nil
+}
+
+func (a *apiServer) experimentActorFromTrialID(trialID int) (actor.Address, error) {
+	eID, _, err := a.m.db.TrialExperimentAndRequestID(trialID)
+	switch {
+	case err == db.ErrNotFound:
+		return actor.Address{}, trialNotFound
+	case err != nil:
+		return actor.Address{}, err
+	}
+	return actor.Addr("experiments", eID), nil
+}
+
+func (a *apiServer) askDefaultSystem(
+	addr actor.Address, msg interface{},
+) (interface{}, error) {
+	switch resp := a.m.system.AskAt(addr, msg); {
+	case resp.Source() == nil, resp.Empty(), resp.Get() == nil:
+		return nil, status.Errorf(
+			codes.NotFound,
+			"actor %s could not be found or the actor did not respond", addr,
+		)
+	case resp.Error() != nil:
+		return nil, status.Errorf(
+			codes.Internal,
+			"actor %s returned error resp %s", addr, resp.Error(),
+		)
+	default:
+		return resp.Get(), nil
+	}
+}
+
+func unexpectedMessageError(addr actor.Address, resp interface{}) error {
+	return status.Errorf(
+		codes.Internal,
+		"actor %s returned unexpected message (%T): %v", addr, resp, resp,
+	)
 }
 
 // isTrialTerminalFunc returns an api.TerminationCheckFn that waits for a trial to finish and
