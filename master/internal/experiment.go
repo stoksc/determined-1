@@ -49,7 +49,7 @@ type (
 	}
 	trialTrainUntilResp struct {
 		finished bool
-		length model.Length
+		length   model.Length
 	}
 
 	// trialClosed is used to replay closes missed when the master dies between when a trial closing in
@@ -245,7 +245,7 @@ func (e *experiment) Receive(ctx *actor.Context) error {
 		if op, ok := e.TrialCurrentOperation[requestID]; ok {
 			ctx.Respond(trialTrainUntilResp{
 				finished: false,
-				length: op.Length,
+				length:   op.Length,
 			})
 		} else {
 			ctx.Respond(trialTrainUntilResp{
