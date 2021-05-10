@@ -1208,6 +1208,35 @@ WHERE id = :id`, setClause(toUpdate)), trial)
 	return nil
 }
 
+// PatchTrialMetadata updates an existing trial's metadata.
+func (db *PgDB) PatchTrialMetadata(id int, metadata map[string]interface{}) error {
+	res, err := db.sql.Exec(`
+UPDATE trials
+SET metadata = metadata || $2
+WHERE id = $1`, id, metadata)
+	if err != nil {
+		return errors.Wrap(err, "saving trial metadata")
+	}
+
+	return errors.Wrapf(checkAffectedSingleRow(res), "saving trial %d metadata", id)
+}
+
+// checkAffectedSingleRow checks that a sql.Resutl affected one row.
+// It returns nil if exactly one row was found, ErrNotFound if 0 were affected,
+// ErrTooMany if greater than 1 were affected and untyped errors in other cases.
+func checkAffectedSingleRow(res sql.Result) error {
+	switch numRows, err := res.RowsAffected(); {
+	case err != nil:
+		return errors.Wrap(err, "checking affected rows")
+	case numRows >= 1:
+		return ErrTooManyRowsAffected
+	case numRows == 0:
+		return ErrNotFound
+	default:
+		return nil
+	}
+}
+
 // RollBackTrial deletes from the database all steps, checkpoints, and validations for the trial
 // that happened after the batch provided.
 func (db *PgDB) RollBackTrial(id, totalBatches int) error {

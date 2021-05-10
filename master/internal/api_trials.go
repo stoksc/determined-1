@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -739,6 +740,26 @@ func (a *apiServer) GetTrialRendezvousInfo(
 	case <-ctx.Done():
 		return nil, nil
 	}
+}
+
+func (a *apiServer) PatchTrialMetadata(
+	_ context.Context, req *apiv1.PatchTrialMetadataRequest,
+) (*apiv1.PatchTrialMetadataResponse, error) {
+	if err := a.checkTrialExists(int(req.TrialId)); err != nil {
+		return nil, err
+	}
+
+	md := make(map[string]interface{})
+	if b, err := protojson.Marshal(req.Metadata); err != nil {
+		return nil, err
+	} else if err := json.Unmarshal(b, &md); err != nil {
+		return nil, err
+	}
+
+	if err := a.m.db.PatchTrialMetadata(int(req.TrialId), md); err != nil {
+		return nil, err
+	}
+	return &apiv1.PatchTrialMetadataResponse{}, nil
 }
 
 func (a *apiServer) trialActorFromID(trialID int) (actor.Address, error) {
