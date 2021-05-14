@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/docker/docker/api/types/mount"
 
@@ -367,9 +366,7 @@ func (s StartTrial) Entrypoint() []string {
 func (s StartTrial) Environment(t TaskSpec) expconf.EnvironmentConfig {
 	env := s.ExperimentConfig.Environment()
 	ports := env.Ports()
-	for i, port := range rendezvousPorts(trialUniquePortOffset(t.Devices)) {
-		ports[fmt.Sprintf("trial-%d", i)] = port
-	}
+	ports["trial"] = rendezvousPort(trialUniquePortOffset(t.Devices))
 	env.SetPorts(ports)
 	return env
 }
@@ -377,10 +374,7 @@ func (s StartTrial) Environment(t TaskSpec) expconf.EnvironmentConfig {
 // EnvVars implements InnerSpec.
 func (s StartTrial) EnvVars(t TaskSpec) map[string]string {
 	portOffset := trialUniquePortOffset(t.Devices)
-	var portStrs []string
-	for _, port := range rendezvousPorts(portOffset) {
-		portStrs = append(portStrs, strconv.Itoa(port))
-	}
+	portStr := rendezvousPort(portOffset)
 	return map[string]string{
 		"DET_EXPERIMENT_ID":            fmt.Sprintf("%d", s.InitialWorkload.ExperimentID),
 		"DET_TRIAL_ID":                 fmt.Sprintf("%d", s.InitialWorkload.TrialID),
@@ -390,7 +384,7 @@ func (s StartTrial) EnvVars(t TaskSpec) map[string]string {
 		"DET_INITIAL_WORKLOAD":         jsonify(s.InitialWorkload),
 		"DET_LATEST_CHECKPOINT":        "/run/determined/train/checkpoint.json",
 		"DET_WORKLOAD_MANAGER_TYPE":    string(s.WorkloadManagerType),
-		"DET_RENDEZVOUS_PORTS":         strings.Join(portStrs, ","),
+		"DET_RENDEZVOUS_PORT":          strconv.Itoa(portStr),
 		"DET_TRIAL_UNIQUE_PORT_OFFSET": strconv.Itoa(portOffset),
 	}
 }
