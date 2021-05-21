@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	cproto "github.com/determined-ai/determined/master/pkg/container"
+
 	"github.com/determined-ai/determined/master/pkg/searcher"
 	"github.com/determined-ai/determined/proto/pkg/experimentv1"
 
@@ -552,7 +554,7 @@ func (a *apiServer) TrialPreemptionSignal(
 
 	id := uuid.New()
 	var watch trialWatchPreemptionResp
-	if err := a.askAtDefaultSystem(trial, trialWatchPreemption{id: id}, &watch); err != nil {
+	if err := a.askAtDefaultSystem(trial, trialWatchPreemptionReq{id: id}, &watch); err != nil {
 		return err
 	}
 	defer a.m.system.TellAt(trial, trialUnwatchPreemption{id: id})
@@ -716,7 +718,27 @@ func (a *apiServer) GetTrialRendezvousInfo(
 		return nil, err
 	}
 
-	a.askAtDefaultSystem(trial, trialCompleteOperation{})
+	var watch trialWatchRendezvousInfoResp
+	if err := a.askAtDefaultSystem(trial, trialWatchRendezvousInfoReq{
+		containerID: cproto.ID(req.ContainerId),
+	}, &watch); err != nil {
+		return nil, err
+	}
+	defer a.m.system.TellAt(trial, trialUnwatchRendezvousInfo{containerID: cproto.ID(req.ContainerId)})
+
+	select {
+	case rsp := <-watch.addresses:
+		switch rsp := rsp.(type) {
+		case error:
+			return nil, rsp
+		case []string:
+			return &apiv1.GetTrialRendezvousInfoResponse{Addresses: rsp}, nil
+		default:
+			panic(fmt.Sprintf("unexpected response from trial"))
+		}
+	case <-ctx.Done():
+		return nil, nil
+	}
 }
 
 func (a *apiServer) trialActorFromID(trialID int) (actor.Address, error) {

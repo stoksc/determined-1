@@ -103,26 +103,23 @@ type (
 		socket      *websocket.Conn
 	}
 
-	// trialWatchPreemption begins watching if the trial has been preempted.
+	// trialWatchPreemptionReq begins watching if the trial has been preempted.
 	// The trial responds to this message with a channel of bools, where sends of true
 	// indicate to preempt and sends of false are used to synchronize (e.g. you want to
 	// block until you receive _something_ but not until the first preemption).
-	trialWatchPreemption   struct{ id uuid.UUID }
-	trialWatchPreemptionResp struct { signal <-chan bool }
-	trialUnwatchPreemption struct{ id uuid.UUID }
+	trialWatchPreemptionReq  struct{ id uuid.UUID }
+	trialWatchPreemptionResp struct{ signal <-chan bool }
+	trialUnwatchPreemption   struct{ id uuid.UUID }
 
-	// trialWatchRendezvousInfo begins watching for rendezvous info.
+	// trialWatchRendezvousInfoReq begins watching for rendezvous info.
 	// When all the containers are ready, the trial will send all the
 	// peer addresses on the channel in the response.
-	trialWatchRendezvousInfo struct {
-		containerID string
-		id uuid.UUID
+	trialWatchRendezvousInfoReq  struct{ containerID cproto.ID }
+	trialWatchRendezvousInfoResp struct {
+		// interface{} is []string of addresses or error.
+		addresses <-chan interface{}
 	}
-	trialWatchRendezvousInfoResp struct { addresses <-chan []string }
-	trialUnwatchRendezvousInfo struct {
-		containerID string
-		id uuid.UUID
-	}
+	trialUnwatchRendezvousInfo struct{ containerID cproto.ID }
 )
 
 // Trial-specific external messages.
@@ -147,7 +144,7 @@ func (m *trialMessage) UnmarshalJSON(data []byte) error {
 
 type rendezvousInfoMessage struct {
 	Addrs []string `json:"addrs"`
-	Rank int `json:"rank"`
+	Rank  int      `json:"rank"`
 }
 
 type rendezvousContainer struct {
@@ -228,7 +225,7 @@ type (
 
 		// The following fields tracks the interaction with the resource providers.
 		// The existence of task signifies we have asked to be allocated.
-		task        *sproto.AllocateRequest
+		task *sproto.AllocateRequest
 		// The existence of allocations signify we asked to be allocated and were allocated.
 		allocations []sproto.Allocation
 
@@ -251,7 +248,7 @@ type (
 		// Map of watcher ID to a bool indicating if the trial should preempt.
 		preemptionWatchers map[uuid.UUID]chan<- bool
 		// Map of container ID to watcher ID a rendezvous info listener.
-		rendezvousWatchers map[string]map[uuid.UUID]chan<- []string
+		rendezvousWatchers map[cproto.ID]chan<- interface{}
 	}
 )
 
@@ -291,7 +288,7 @@ func newTrial(
 		taskSpec:       exp.taskSpec,
 
 		preemptionWatchers: make(map[uuid.UUID]chan<- bool),
-		rendezvousWatchers: make(map[string]map[uuid.UUID]chan<- []string),
+		rendezvousWatchers: make(map[cproto.ID]chan<- interface{}),
 	}
 }
 
@@ -323,48 +320,15 @@ func (t *trial) Receive(ctx *actor.Context) error {
 		// the code below this switch statement to handle releasing resources in
 		// the scheduler. This should be refactored into the terminating logic.
 
-	case trialWatchPreemption:
-		// Size 2; at most 2 messages can be sent and we don't want to block or lose them.
-		w := make(chan bool, 2)
-		switch {
-		case len(t.allocations) == 0:
-			ctx.Respond(apiutils.AsErrBadRequest("no preemption status available for unallocated trials"))
-		case t.PendingGracefulTermination:
-			w <- true
-			close(w)
-			ctx.Respond(trialWatchPreemptionResp{signal: w})
-		default:
-			t.preemptionWatchers[msg.id] = w
-			w <- false
-			ctx.Respond(trialWatchPreemptionResp{signal: w})
-		}
+	case trialWatchPreemptionReq:
+		t.registerPreemptionWatcher(ctx, msg)
 	case trialUnwatchPreemption:
 		delete(t.preemptionWatchers, msg.id)
 
-	case trialWatchRendezvousInfo:
-		// Size 1; rendezvous info will only ever be sent once.
-		w := make(chan []string, 1)
-		if t.rendezvousWatchers[msg.containerID] == nil {
-			t.rendezvousWatchers[msg.containerID] = make(map[uuid.UUID]chan<- []string)
-		}
-		t.rendezvousWatchers[msg.containerID][msg.id] = w
-
-		ctx.Respond(trialWatchRendezvousInfoResp{
-			addresses: w,
-		})
-
-		if t.allReadyV2() {
-			ri, err := t.rendezvousInfo()
-			for cid, ws := range t.rendezvousWatchers {
-				for id, w := range ws {
-					w <- ri
-					close(w)
-					delete(t.rendezvousWatchers[cid], id)
-				}
-			}
-		}
+	case trialWatchRendezvousInfoReq:
+		t.registerRendezvousWatcher(ctx, msg)
 	case trialUnwatchRendezvousInfo:
-		delete(t.rendezvousWatchers[msg.containerID], msg.id)
+		delete(t.rendezvousWatchers, msg.containerID)
 
 	case actor.PostStop:
 		if !t.idSet {
@@ -438,6 +402,69 @@ func (t *trial) Receive(ctx *actor.Context) error {
 	}
 
 	return nil
+}
+
+func (t *trial) registerRendezvousWatcher(ctx *actor.Context, msg trialWatchRendezvousInfoReq) {
+	// Validate this watch request is unique and not stale.
+	if _, ok := t.containerRanks[msg.containerID]; !ok {
+		ctx.Respond(apiutils.AsErrBadRequest(
+			"rendezvous request from stale container: %s", msg.containerID,
+		))
+		return
+	} else if _, ok := t.rendezvousWatchers[msg.containerID]; ok {
+		ctx.Respond(apiutils.AsErrBadRequest(
+			"rendezvous request from already connected container: %s", msg.containerID,
+		))
+		return
+	}
+
+	// Register and respond with the watcher channel. Channel is
+	// size 1 since rendezvous info will only ever be sent once.
+	w := make(chan interface{}, 1)
+	t.rendezvousWatchers[msg.containerID] = w
+	ctx.Respond(trialWatchRendezvousInfoResp{addresses: w})
+
+	// If we're not all ready, send the all ready timeout notification and return.
+	t.lastContainerConnectedTime = time.Now()
+	if !t.allReadyV2() {
+		actors.NotifyAfter(ctx, allReadyTimeoutPeriod, allReadyTimeout{runID: t.RunID})
+		return
+	}
+
+	// Otherwise push rendezvous to all watchers.
+	ri, err := t.rendezvousInfo()
+	for cid, w := range t.rendezvousWatchers {
+		if err != nil {
+			w <- err
+		} else {
+			w <- ri
+		}
+		close(w)
+		delete(t.rendezvousWatchers, cid)
+	}
+}
+
+func (t *trial) registerPreemptionWatcher(ctx *actor.Context, msg trialWatchPreemptionReq) {
+	if len(t.allocations) == 0 {
+		ctx.Respond(apiutils.AsErrBadRequest(
+			"no preemption status available for unallocated trials",
+		))
+		return
+	}
+
+	// Register and respond with the watcher channel. Size 2; at most 2 messages
+	// can be sent and we don't want to block or lose them.
+	w := make(chan bool, 2)
+	t.preemptionWatchers[msg.id] = w
+	ctx.Respond(trialWatchPreemptionResp{signal: w})
+
+	if t.PendingGracefulTermination {
+		w <- true
+		close(w)
+		delete(t.preemptionWatchers, msg.id)
+	} else {
+		w <- false
+	}
 }
 
 func (t *trial) processOperations(ops []searcher.Operation) {
@@ -921,6 +948,12 @@ func (t *trial) allReadyV2() bool {
 	if t.allReadySucceeded {
 		return true
 	}
+
+	// Ensure all ContainerStarted messages have arrived.
+	if len(t.containers) < len(t.allocations) {
+		return false
+	}
+
 	t.allReadySucceeded = len(t.rendezvousWatchers) == len(t.allocations)
 	return t.allReadySucceeded
 }
@@ -995,8 +1028,8 @@ func (t *trial) pushRendezvous(ctx *actor.Context) error {
 
 		if err := api.WriteSocketJSON(ctx, socket, &trialMessage{
 			RendezvousInfo: &rendezvousInfoMessage{
-				Addrs:      raddrs,
-				Rank:       caddr.Ordinal,
+				Addrs: raddrs,
+				Rank:  caddr.Ordinal,
 			},
 		}); err != nil {
 			ctx.Log().WithError(err).Error("cannot write to socket")
@@ -1005,7 +1038,6 @@ func (t *trial) pushRendezvous(ctx *actor.Context) error {
 
 	return nil
 }
-
 
 // rendezvousInfo gathers up the rendezvous ports addresses for the trial.
 func (t *trial) rendezvousInfo() ([]string, error) {

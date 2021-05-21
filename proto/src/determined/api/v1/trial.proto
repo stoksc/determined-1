@@ -386,4 +386,7 @@ message GetTrialRendezvousInfoRequest {
   determined.trial.v1.RendezvousInfo rendezvous_info = 3;
 }
 // Response to GetTrialRendezvousInfoRequest
-message GetTrialRendezvousInfoResponse {}
+message GetTrialRendezvousInfoResponse {
+  // The rendezvous addresses.
+  repeated string addresses = 1;
+}

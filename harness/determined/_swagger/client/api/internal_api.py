@@ -716,6 +716,111 @@ class InternalApi(object):
             _request_timeout=params.get('_request_timeout'),
             collection_formats=collection_formats)
 
+    def determined_get_trial_rendezvous_info(self, trial_id, body, **kwargs):  # noqa: E501
+        """Gather a trial's rendezvous info. Blocks until all trial containers connect to gather their rendezvous information and responds to them all at once.  # noqa: E501
+
+        This method makes a synchronous HTTP request by default. To make an
+        asynchronous HTTP request, please pass async_req=True
+        >>> thread = api.determined_get_trial_rendezvous_info(trial_id, body, async_req=True)
+        >>> result = thread.get()
+
+        :param async_req bool
+        :param int trial_id: The id of the trial. (required)
+        :param V1RendezvousInfo body: The rendezvous info. (required)
+        :return: V1GetTrialRendezvousInfoResponse
+                 If the method is called asynchronously,
+                 returns the request thread.
+        """
+        kwargs['_return_http_data_only'] = True
+        if kwargs.get('async_req'):
+            return self.determined_get_trial_rendezvous_info_with_http_info(trial_id, body, **kwargs)  # noqa: E501
+        else:
+            (data) = self.determined_get_trial_rendezvous_info_with_http_info(trial_id, body, **kwargs)  # noqa: E501
+            return data
+
+    def determined_get_trial_rendezvous_info_with_http_info(self, trial_id, body, **kwargs):  # noqa: E501
+        """Gather a trial's rendezvous info. Blocks until all trial containers connect to gather their rendezvous information and responds to them all at once.  # noqa: E501
+
+        This method makes a synchronous HTTP request by default. To make an
+        asynchronous HTTP request, please pass async_req=True
+        >>> thread = api.determined_get_trial_rendezvous_info_with_http_info(trial_id, body, async_req=True)
+        >>> result = thread.get()
+
+        :param async_req bool
+        :param int trial_id: The id of the trial. (required)
+        :param V1RendezvousInfo body: The rendezvous info. (required)
+        :return: V1GetTrialRendezvousInfoResponse
+                 If the method is called asynchronously,
+                 returns the request thread.
+        """
+
+        all_params = ['trial_id', 'body']  # noqa: E501
+        all_params.append('async_req')
+        all_params.append('_return_http_data_only')
+        all_params.append('_preload_content')
+        all_params.append('_request_timeout')
+
+        params = locals()
+        for key, val in six.iteritems(params['kwargs']):
+            if key not in all_params:
+                raise TypeError(
+                    "Got an unexpected keyword argument '%s'"
+                    " to method determined_get_trial_rendezvous_info" % key
+                )
+            params[key] = val
+        del params['kwargs']
+        # verify the required parameter 'trial_id' is set
+        if ('trial_id' not in params or
+                params['trial_id'] is None):
+            raise ValueError("Missing the required parameter `trial_id` when calling `determined_get_trial_rendezvous_info`")  # noqa: E501
+        # verify the required parameter 'body' is set
+        if ('body' not in params or
+                params['body'] is None):
+            raise ValueError("Missing the required parameter `body` when calling `determined_get_trial_rendezvous_info`")  # noqa: E501
+
+        collection_formats = {}
+
+        path_params = {}
+        if 'trial_id' in params:
+            path_params['trialId'] = params['trial_id']  # noqa: E501
+
+        query_params = []
+
+        header_params = {}
+
+        form_params = []
+        local_var_files = {}
+
+        body_params = None
+        if 'body' in params:
+            body_params = params['body']
+        # HTTP header `Accept`
+        header_params['Accept'] = self.api_client.select_header_accept(
+            ['application/json'])  # noqa: E501
+
+        # HTTP header `Content-Type`
+        header_params['Content-Type'] = self.api_client.select_header_content_type(  # noqa: E501
+            ['application/json'])  # noqa: E501
+
+        # Authentication setting
+        auth_settings = ['BearerToken']  # noqa: E501
+
+        return self.api_client.call_api(
+            '/api/v1/trials/{trialId}/rendezvous_info', 'POST',
+            path_params,
+            query_params,
+            header_params,
+            body=body_params,
+            post_params=form_params,
+            files=local_var_files,
+            response_type='V1GetTrialRendezvousInfoResponse',  # noqa: E501
+            auth_settings=auth_settings,
+            async_req=params.get('async_req'),
+            _return_http_data_only=params.get('_return_http_data_only'),
+            _preload_content=params.get('_preload_content', True),
+            _request_timeout=params.get('_request_timeout'),
+            collection_formats=collection_formats)
+
     def determined_metric_batches(self, experiment_id, metric_name, metric_type, **kwargs):  # noqa: E501
         """Get the milestones (in batches processed) at which a metric is recorded by an experiment.  # noqa: E501
 
