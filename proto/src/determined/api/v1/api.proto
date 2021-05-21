@@ -588,6 +588,17 @@ service Determined {
       tags: "Internal"
     };
   }
+  // Gather a trial's rendezvous info.
+  rpc GetTrialRendezvousInfo(GetTrialRendezvousInfoRequest)
+      returns (GetTrialRendezvousInfoResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/trials/{trial_id}/rendezvous_info"
+      body: "rendezvous_info"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
 
   // Get a list of templates.
   rpc GetTemplates(GetTemplatesRequest) returns (GetTemplatesResponse) {
