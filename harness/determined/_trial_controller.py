@@ -1,5 +1,6 @@
 import abc
 import logging
+import os
 import pathlib
 from typing import Any, Dict, Optional, cast
 
@@ -50,6 +51,12 @@ class TrialController(metaclass=abc.ABCMeta):
         self.rendezvous_info = rendezvous_info
         self.hvd_config = hvd_config
         self.prof = prof
+
+        self.prof = profiler.ProfilerAgent.from_env(
+            env,
+            rendezvous_info.get_rank(),
+            int(os.getenv("HOROVOD_LOCAL_RANK", 0)),
+        )
 
         self._check_if_trial_supports_configurations(env)
 
@@ -239,7 +246,6 @@ class LoopTrialController(TrialController):
         load_path: Optional[pathlib.Path],
         rendezvous_info: RendezvousInfo,
         hvd_config: horovod.HorovodContext,
-        prof: profiler.ProfilerAgent,
     ) -> None:
         super().__init__(
             context=context,
@@ -248,7 +254,6 @@ class LoopTrialController(TrialController):
             load_path=load_path,
             rendezvous_info=rendezvous_info,
             hvd_config=hvd_config,
-            prof=prof,
         )
 
         self.batch_size = self.context.get_per_slot_batch_size()

@@ -708,7 +708,6 @@ class _DeterminedProfiler(Callback):
 
     def __init__(self, prof: profiler.ProfilerAgent) -> None:
         super().__init__()
-        self.current_batch = 0
         self.prof = prof
 
     def get_state(self) -> Dict:
@@ -717,6 +716,5 @@ class _DeterminedProfiler(Callback):
     def load_state(self, state: Any) -> None:
         self.current_batch = state["current_batch"]
 
-    def on_train_batch_begin(self, batch: int, logs: Optional[Dict] = None) -> None:
-        self.current_batch += 1
-        self.prof.update_batch_idx(self.current_batch)
+    def on_train_batch_begin(self, batch: int, _: Optional[Dict] = None) -> None:
+        self.prof.update_batch_idx(batch)

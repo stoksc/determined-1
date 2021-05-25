@@ -294,7 +294,6 @@ class TFKerasTrialController(det.LoopTrialController):
             load_path=load_path,
             rendezvous_info=rendezvous_info,
             hvd_config=hvd_config,
-            prof=prof,
         )
 
     @staticmethod
@@ -681,12 +680,13 @@ class TFKerasTrialController(det.LoopTrialController):
                 self.multiplexer_load_state = pickle.load(f)
 
     def run(self) -> None:
-        try:
-            self._launch_fit()
-        except det.errors.WorkerFinishedGracefully:
-            pass
-        finally:
-            self._stop_enqueuers()
+        with self.prof:
+            try:
+                self._launch_fit()
+            except det.errors.WorkerFinishedGracefully:
+                pass
+            finally:
+                self._stop_enqueuers()
 
     def _launch_fit(self) -> None:
         training_data = self.training_data

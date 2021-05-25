@@ -17,7 +17,7 @@ from tensorflow.python.util import function_utils
 from tensorflow_estimator.python.estimator.training import _NewCheckpointListenerForEvaluate
 
 import determined as det
-from determined import estimator, horovod, monkey_patch, profiler, tensorboard, workload
+from determined import estimator, horovod, monkey_patch, profile, profiler, tensorboard, workload
 from determined._tf_rng import get_rng_state, set_rng_state
 from determined.common import check
 from determined.horovod import hvd
