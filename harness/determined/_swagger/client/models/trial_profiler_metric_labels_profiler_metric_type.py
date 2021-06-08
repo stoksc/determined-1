@@ -29,6 +29,7 @@ class TrialProfilerMetricLabelsProfilerMetricType(object):
     UNSPECIFIED = "PROFILER_METRIC_TYPE_UNSPECIFIED"
     SYSTEM = "PROFILER_METRIC_TYPE_SYSTEM"
     TIMING = "PROFILER_METRIC_TYPE_TIMING"
+    MISC = "PROFILER_METRIC_TYPE_MISC"
 
     """
     Attributes:

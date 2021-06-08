@@ -147,7 +147,7 @@ class ProfilerApi(object):
         :param str labels_name: The name of the metric.
         :param str labels_agent_id: The agent ID associated with the metric.
         :param str labels_gpu_uuid: The GPU UUID associated with the metric.
-        :param str labels_metric_type: The type of the metric.   - PROFILER_METRIC_TYPE_UNSPECIFIED: Zero-value (not allowed).  - PROFILER_METRIC_TYPE_SYSTEM: For systems metrics, like GPU utilization or memory.  - PROFILER_METRIC_TYPE_TIMING: For timing metrics, like how long a backwards pass or getting a batch from the dataloader took.
+        :param str labels_metric_type: The type of the metric.   - PROFILER_METRIC_TYPE_UNSPECIFIED: Zero-value (not allowed).  - PROFILER_METRIC_TYPE_SYSTEM: For systems metrics, like GPU utilization or memory.  - PROFILER_METRIC_TYPE_TIMING: For timing metrics, like how long a backwards pass or getting a batch from the dataloader took.  - PROFILER_METRIC_TYPE_MISC: For other miscellaneous metrics.
         :param bool follow: Continue streaming metrics until the trial stops. Defaults to False.
         :return: StreamResultOfV1GetTrialProfilerMetricsResponse
                  If the method is called asynchronously,
@@ -173,7 +173,7 @@ class ProfilerApi(object):
         :param str labels_name: The name of the metric.
         :param str labels_agent_id: The agent ID associated with the metric.
         :param str labels_gpu_uuid: The GPU UUID associated with the metric.
-        :param str labels_metric_type: The type of the metric.   - PROFILER_METRIC_TYPE_UNSPECIFIED: Zero-value (not allowed).  - PROFILER_METRIC_TYPE_SYSTEM: For systems metrics, like GPU utilization or memory.  - PROFILER_METRIC_TYPE_TIMING: For timing metrics, like how long a backwards pass or getting a batch from the dataloader took.
+        :param str labels_metric_type: The type of the metric.   - PROFILER_METRIC_TYPE_UNSPECIFIED: Zero-value (not allowed).  - PROFILER_METRIC_TYPE_SYSTEM: For systems metrics, like GPU utilization or memory.  - PROFILER_METRIC_TYPE_TIMING: For timing metrics, like how long a backwards pass or getting a batch from the dataloader took.  - PROFILER_METRIC_TYPE_MISC: For other miscellaneous metrics.
         :param bool follow: Continue streaming metrics until the trial stops. Defaults to False.
         :return: StreamResultOfV1GetTrialProfilerMetricsResponse
                  If the method is called asynchronously,
