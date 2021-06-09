@@ -809,6 +809,29 @@ class MetricBatch:
         return TrialProfilerMetricsBatch(values, batches, timestamps, labels)
 
     @staticmethod
+    def to_ts_dod_format(timestamps: List[datetime]) -> List[int]:
+        if len(timestamps) == 0:
+            return []
+
+        timestamp_start_micros = MetricBatch.datetime_to_micros(timestamps[0])
+        dod_encoded_timestamps = [timestamp_start_micros]
+        prev_micros = timestamp_start_micros
+        prev_delta_of_delta = 0
+        for timestamp in timestamps[1:]:
+            micros = MetricBatch.datetime_to_micros(timestamp)
+            delta = micros - prev_micros
+            delta_of_delta = delta - prev_delta_of_delta
+            dod_encoded_timestamps.append(delta_of_delta)
+            prev_micros = micros
+            prev_delta_of_delta = delta_of_delta
+
+        return dod_encoded_timestamps
+
+    @staticmethod
+    def datetime_to_micros(timestamp: datetime) -> int:
+        return int(time.mktime(timestamp.timetuple()) * 1e6 + timestamp.microsecond)
+
+    @staticmethod
     def make_labels(
         name: str, trial_id: str, agent_id: str, metric_type: str, gpu_uuid_label: str
     ) -> Dict[str, Any]:
