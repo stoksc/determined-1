@@ -8,6 +8,7 @@ import yaml
 
 from determined.common import api
 from determined.common.api import authentication, certs
+from determined.profiler import MetricType
 from tests import config as conf
 from tests import experiment as exp
 
@@ -15,15 +16,17 @@ from tests import experiment as exp
 @pytest.mark.e2e_gpu  # type: ignore
 @pytest.mark.timeout(600)  # type: ignore
 @pytest.mark.parametrize(  # type: ignore
-    "framework_base_experiment,framework_timings_enabled",
+    "framework_base_experiment,framework_timings_enabled,framework_throughput_enabled",
     [
-        ("tutorials/mnist_pytorch", True),
-        ("tutorials/fashion_mnist_tf_keras", False),
-        ("computer_vision/mnist_estimator", False),
+        ("tutorials/mnist_pytorch", True, True),
+        ("tutorials/fashion_mnist_tf_keras", False, True),
+        ("computer_vision/mnist_estimator", False, False),
     ],
 )
 def test_streaming_observability_metrics_apis(
-    framework_base_experiment: str, framework_timings_enabled: bool
+    framework_base_experiment: str,
+    framework_timings_enabled: bool,
+    framework_throughput_enabled: bool,
 ) -> None:
     # TODO: refactor tests to not use cli singleton auth.
     certs.cli_cert = certs.default_load(conf.make_master_url())
@@ -47,9 +50,11 @@ def test_streaming_observability_metrics_apis(
     trial_id = trials[0]["id"]
 
     request_profiling_metric_labels(trial_id, framework_timings_enabled)
-    request_profiling_system_metrics(trial_id, "gpu_util")
+    request_profiling_metrics(trial_id, MetricType.SYSTEM, "gpu_util")
     if framework_timings_enabled:
         request_profiling_pytorch_timing_metrics(trial_id, "train_batch")
+    if framework_throughput_enabled:
+        request_profiling_metrics(trial_id, MetricType.MISC, "samples_per_second")
 
 
 def request_profiling_metric_labels(trial_id: int, timing_enabled: bool) -> None:
@@ -97,8 +102,8 @@ def request_profiling_metric_labels(trial_id: int, timing_enabled: bool) -> None
             return
 
 
-def request_profiling_system_metrics(trial_id: int, metric_name: str) -> None:
-    def validate_gpu_metric_batch(batch: Dict[str, Any]) -> None:
+def request_profiling_metrics(trial_id: int, metric_type: MetricType, metric_name: str) -> None:
+    def validate_metric_batch(batch: Dict[str, Any]) -> None:
         num_values = len(batch["values"])
         num_batch_indexes = len(batch["batches"])
         num_timestamps = len(batch["timestamps"])
@@ -114,13 +119,13 @@ def request_profiling_system_metrics(trial_id: int, metric_name: str) -> None:
         conf.make_master_url(),
         "api/v1/trials/{}/profiler/metrics?{}".format(
             trial_id,
-            to_query_params(PROFILER_METRIC_TYPE_SYSTEM, metric_name),
+            to_query_params(metric_type.value, metric_name),
         ),
         stream=True,
     ) as r:
         for line in r.iter_lines():
             batch = simplejson.loads(line)["result"]["batch"]
-            validate_gpu_metric_batch(batch)
+            validate_metric_batch(batch)
 
 
 def request_profiling_pytorch_timing_metrics(trial_id: int, metric_name: str) -> None:
